@@ -115,7 +115,11 @@ bash ./scripts/share_demo_no_account.sh
 
 ## Website control panel
 
-`index.html` now includes:
+Control panel is separated from the GitHub Pages MVP UI:
+- MVP UI remains at repo root (`index.html`, `upload.html`, etc.)
+- Web Studio control panel lives under `control-panel/`
+
+`control-panel/index.html` includes:
 - one-tap local actions (start backend, start/stop share tunnel, refresh generated URL)
 - generated backend URL display (read from runtime files)
 - Render/tunnel backend -> GitHub Pages URL generator (backend URL only input)

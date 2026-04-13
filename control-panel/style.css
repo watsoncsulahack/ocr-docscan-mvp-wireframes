@@ -94,6 +94,11 @@ html, body {
 
 .btn:hover { background: var(--btn-hover); }
 
+.btn-small {
+  margin-top: 8px;
+  padding: 8px 12px;
+}
+
 .preview-box {
   margin: 18px 0;
   border: 2px dashed var(--line);
@@ -122,6 +127,17 @@ html, body {
   color: var(--text);
   padding: 11px 12px;
   font: inherit;
+}
+
+.input-wide {
+  width: min(100%, 760px);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  line-height: 1.35;
 }
 
 .note { color: var(--muted); }
@@ -166,4 +182,12 @@ html, body {
   margin-top: 18px;
   color: var(--muted);
   font-size: 0.95rem;
+}
+
+a {
+  color: #8db9e8;
+}
+
+a:hover {
+  color: #b9d8f6;
 }

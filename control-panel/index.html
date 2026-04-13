@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OCR Demo Control Panel</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body data-page="index">
+  <main class="page">
+    <section class="card">
+      <div class="topbar">
+        <h1 class="h1">OCR Demo Control Panel</h1>
+        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      </div>
+      <p id="backendHealthMeta" class="note"></p>
+      <div class="hr"></div>
+
+      <h2 class="h2" style="margin-bottom: 10px;">Local Backend Operations</h2>
+      <p class="note">One tap controls for Termux scripts through Web Studio supervisor.</p>
+
+      <div class="row" style="margin-bottom: 10px;">
+        <button id="startLocalBackendBtn" class="btn" type="button">Start Local Backend</button>
+        <button id="startTunnelBtn" class="btn" type="button">Start Tunnel + Generate URL</button>
+        <button id="stopTunnelBtn" class="btn" type="button">Stop Tunnel</button>
+      </div>
+
+      <div class="row" style="margin-bottom: 14px;">
+        <button id="refreshGeneratedBackendBtn" class="btn" type="button">Refresh URLs</button>
+        <button id="useGeneratedBackendBtn" class="btn" type="button">Use Generated URL as Active Backend</button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="localBackendUrlOutput">Detected local backend URL</label>
+        <textarea id="localBackendUrlOutput" class="input textarea" readonly></textarea>
+        <button class="btn btn-small" data-copy-target="localBackendUrlOutput" type="button">Copy</button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="generatedBackendUrlOutput">Generated public backend URL (from shell script)</label>
+        <textarea id="generatedBackendUrlOutput" class="input textarea" readonly></textarea>
+        <button class="btn btn-small" data-copy-target="generatedBackendUrlOutput" type="button">Copy</button>
+      </div>
+
+      <p id="localOpsMsg" class="note"></p>
+
+      <div class="hr"></div>
+
+      <h2 class="h2" style="margin-bottom: 10px;">Render Link Helper</h2>
+      <p class="note">Enter backend URL only. GitHub Pages base URL is preconfigured.</p>
+
+      <div class="field">
+        <label class="label" for="renderBackendUrlInput">Backend URL (Render or tunnel)</label>
+        <input id="renderBackendUrlInput" class="input input-wide" placeholder="https://ocr-docscan-mvp-backend.onrender.com" />
+      </div>
+
+      <div class="row" style="margin-bottom: 14px;">
+        <button id="generateRenderLinkBtn" class="btn" type="button">Generate GitHub Pages Link</button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="githubPagesRenderUrlOutput">GitHub Pages URL (backend prefilled)</label>
+        <textarea id="githubPagesRenderUrlOutput" class="input textarea" readonly></textarea>
+        <button class="btn btn-small" data-copy-target="githubPagesRenderUrlOutput" type="button">Copy Link</button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="renderBackendOnlyOutput">Backend URL only</label>
+        <textarea id="renderBackendOnlyOutput" class="input textarea" readonly></textarea>
+        <button class="btn btn-small" data-copy-target="renderBackendOnlyOutput" type="button">Copy Backend URL</button>
+      </div>
+
+      <p id="renderLinkMsg" class="note"></p>
+
+      <div class="hr"></div>
+
+      <h2 class="h2" style="margin-bottom: 10px;">Gemini Key Wiring</h2>
+      <p class="note">Create API key in AI Studio, then apply from this panel.</p>
+      <p class="note"><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Open AI Studio API Keys</a></p>
+
+      <div class="field">
+        <label class="label" for="geminiKeyInput">Gemini API key</label>
+        <input id="geminiKeyInput" class="input input-wide" type="password" placeholder="AIza..." />
+      </div>
+
+      <div class="row" style="margin-bottom: 10px;">
+        <button id="applyGeminiKeyBtn" class="btn" type="button">Apply Key (One Tap)</button>
+        <button id="buildGeminiCommandBtn" class="btn" type="button">Build Fallback Command</button>
+        <button class="btn" data-copy-target="geminiSetupCommandOutput" type="button">Copy Command</button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="geminiSetupCommandOutput">Fallback command (if one-tap apply fails)</label>
+        <textarea id="geminiSetupCommandOutput" class="input textarea" readonly></textarea>
+      </div>
+
+      <p id="geminiSetupNote" class="note"></p>
+
+      <p class="footer-note">Control panel only, built for local operations + GitHub Pages backend wiring.</p>
+    </section>
+  </main>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
