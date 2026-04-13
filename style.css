@@ -47,8 +47,36 @@ html, body {
 
 .h2 {
   font-size: clamp(20px, 3.3vw, 28px);
-  margin: 0 0 8px;
+  margin: 0;
   font-weight: 700;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.status-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.status-chip.ok {
+  border-color: #2f7040;
+  color: #9de1ad;
+  background: #102316;
+}
+
+.status-chip.bad {
+  border-color: #7b3a3a;
+  color: #f5b1b1;
+  background: #2a1111;
 }
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; }

@@ -1,39 +1,62 @@
-# OCR Doc Scan MVP Wireframes (Static HTML)
+# OCR Doc Scan MVP (Frontend + Demo Backend)
 
-This repository contains static HTML wireframes for the 5 requested screens:
+This repo now includes:
 
-1. Upload (`upload.html`)
-2. Processing (`processing.html`)
-3. Review (`review.html`)
-4. Confirmation (`confirmation.html`)
-5. Stored Records (`records.html`)
+- Static GitHub Pages frontend (`index.html`, `upload.html`, `review.html`, etc.)
+- Minimal FastAPI backend for demo state (`backend/main.py`)
 
-A navigation page is included at `index.html`.
+## Current Demo Scope
 
-## Scope
+- Camera/image upload from phone browser
+- `/scan` endpoint (currently placeholder extraction from filename; OCR phase next)
+- Review/correct fields
+- Save to SQLite (`containerNo`, `date`, `sourceFileName`, `corrected`, `createdAt`)
+- Records table reflects backend data
 
-- HTML/CSS only
-- No backend/API integration
-- No OCR logic implemented yet
+## Repo Structure
+
+- Frontend pages: root HTML/CSS/JS
+- Backend app: `backend/`
+- Runtime data: `data/records.sqlite`
+- Uploaded files: `uploads/`
+- Render deploy config: `render.yaml`
 
 ## Run locally
 
-Open `index.html` directly in browser, or run a local static server:
+### 1) Backend
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload --port 8010
+```
+
+### 2) Frontend
 
 ```bash
 python3 -m http.server 8080
 ```
 
-Then open:
+Open:
+- Frontend: `http://127.0.0.1:8080`
+- Backend health: `http://127.0.0.1:8010/health`
 
-`http://localhost:8080`
+## GitHub Pages + Backend Wiring
 
-## Files
+- Frontend reads backend URL from `config.js` (`window.OCR_BACKEND_URL`)
+- You can override at runtime from the index page and save in localStorage.
 
-- `index.html` - quick screen navigator
-- `upload.html` - upload/camera UI
-- `processing.html` - loading state
-- `review.html` - editable extracted fields
-- `confirmation.html` - submission success
-- `records.html` - table view of stored records
-- `style.css` - shared wireframe styling
+## Deploy backend (Render recommended)
+
+This repo includes `render.yaml`. Create a Render web service from this repo:
+- Build: `pip install -r backend/requirements.txt`
+- Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+
+Then set `window.OCR_BACKEND_URL` in `config.js` to your Render URL and push.
+
+## Security Notes (demo-light)
+
+- CORS limited to GitHub Pages + localhost defaults
+- File type and size validation in `/scan`
+- Reset route uses confirmation token (`RESET_DEMO`)

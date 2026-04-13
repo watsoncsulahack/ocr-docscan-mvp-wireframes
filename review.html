@@ -6,35 +6,40 @@
   <title>Review - OCR MVP</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
-<body>
+<body data-page="review">
   <main class="page">
     <section class="card">
+      <div class="topbar">
+        <h2 class="h2">Review Extracted Data</h2>
+        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      </div>
       <div class="hr"></div>
-      <h2 class="h2">Review Extracted Data</h2>
 
       <div class="field">
         <label class="label" for="containerNo">Container Number:</label>
-        <input class="input" id="containerNo" value="ABCD1234567" />
+        <input class="input" id="containerNo" placeholder="ABCD1234567" />
       </div>
 
       <div class="field">
-        <label class="label" for="eventDate">Event Date:</label>
-        <input class="input" id="eventDate" value="04/13/2026" />
+        <label class="label" for="eventDate">Event Date (MM/DD/YYYY):</label>
+        <input class="input" id="eventDate" placeholder="04/13/2026" />
       </div>
 
-      <p class="note">If no date is detected, default to upload time (MM/DD/YYYY) and allow user correction.</p>
+      <p class="note">Review and correct values before final save.</p>
+      <p id="reviewMsg" class="note"></p>
 
       <div class="hr" style="margin-top:22px;"></div>
       <div class="row">
-        <button class="btn" type="button">Confirm Submission</button>
+        <button id="confirmBtn" class="btn" type="button">Confirm Submission</button>
       </div>
 
       <div class="hr" style="margin-top:18px;"></div>
       <div class="row">
-        <a class="btn" href="./confirmation.html">Next: Confirmation</a>
-        <a class="btn" href="./processing.html">Back to Processing</a>
+        <a class="btn" href="./upload.html">Back to Upload</a>
       </div>
     </section>
   </main>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

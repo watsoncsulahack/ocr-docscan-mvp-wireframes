@@ -6,25 +6,28 @@
   <title>Processing - OCR MVP</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
-<body>
+<body data-page="processing">
   <main class="page">
     <section class="card">
+      <div class="topbar">
+        <h2 class="h2">Processing Document...</h2>
+        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      </div>
       <div class="hr"></div>
-      <h2 class="h2">Processing Document...</h2>
 
       <div style="margin: 20px 0 10px; display:flex; align-items:center; gap:12px;">
         <div class="spinner" aria-hidden="true"></div>
-        <div>[ Loading Spinner ]</div>
+        <div>Extracting container number and date...</div>
       </div>
-
-      <p style="font-size:1.2rem; margin-top:18px;">Extracting container number and date...</p>
 
       <div class="hr" style="margin-top:28px;"></div>
       <div class="row">
-        <a class="btn" href="./review.html">Next: Review</a>
         <a class="btn" href="./upload.html">Back to Upload</a>
+        <a class="btn" href="./review.html">Go to Review</a>
       </div>
     </section>
   </main>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

@@ -6,32 +6,39 @@
   <title>Upload - OCR MVP</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
-<body>
+<body data-page="upload">
   <main class="page">
     <section class="card">
+      <div class="topbar">
+        <h2 class="h2">OCR Document Upload</h2>
+        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      </div>
       <div class="hr"></div>
-      <h2 class="h2">OCR Document Upload</h2>
 
-      <div class="row" style="margin-top:16px;">
-        <button class="btn" type="button">Open Camera</button>
-        <button class="btn" type="button">Upload Image</button>
+      <div class="row" style="margin-top:10px;">
+        <input id="fileInput" class="input" type="file" accept="image/*" capture="environment" />
       </div>
 
       <div class="preview-box">
         <div>
-          <div style="font-size:1.4rem; margin-bottom:8px;">Image Preview</div>
-          <div>(empty until upload)</div>
+          <div style="font-size:1.4rem; margin-bottom:8px;">Camera / Upload Input</div>
+          <div>Choose image then tap Scan Document</div>
         </div>
       </div>
 
-      <button class="btn" type="button">Scan Document</button>
+      <div class="row">
+        <button id="scanBtn" class="btn" type="button">Scan Document</button>
+      </div>
+      <p id="scanMsg" class="note"></p>
 
       <div class="hr" style="margin-top:18px;"></div>
       <div class="row">
-        <a class="btn" href="./processing.html">Next: Processing</a>
         <a class="btn" href="./index.html">Back to Menu</a>
+        <a class="btn" href="./records.html">View Records</a>
       </div>
     </section>
   </main>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>

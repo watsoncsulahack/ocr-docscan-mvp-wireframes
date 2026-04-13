@@ -6,11 +6,21 @@
   <title>OCR MVP Wireframes</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
-<body>
+<body data-page="index">
   <main class="page">
     <section class="card">
-      <h1 class="h1">OCR MVP Wireframe Pages</h1>
+      <div class="topbar">
+        <h1 class="h1">OCR MVP Demo</h1>
+        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      </div>
       <div class="hr"></div>
+
+      <p class="note">Set backend URL once, then use the screens below.</p>
+      <div class="row" style="align-items:center; margin: 10px 0 16px;">
+        <input id="backendUrlInput" class="input" style="max-width: 520px;" placeholder="https://your-backend-url" />
+        <button id="saveBackendUrlBtn" class="btn" type="button">Save Backend URL</button>
+      </div>
+
       <div class="nav-grid">
         <a class="btn" href="./upload.html">1. Upload Screen</a>
         <a class="btn" href="./processing.html">2. Processing Screen</a>
@@ -18,8 +28,11 @@
         <a class="btn" href="./confirmation.html">4. Confirmation Screen</a>
         <a class="btn" href="./records.html">5. Stored Records Screen</a>
       </div>
-      <p class="footer-note">Static HTML-only prototype pages (no backend wiring yet).</p>
+
+      <p class="footer-note">Frontend is wired to backend health and API state for live demo.</p>
     </section>
   </main>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
