@@ -2,6 +2,12 @@
   const LS_KEY = "ocr.backend.url";
 
   function backendUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = String(params.get("backend") || "").trim().replace(/\/$/, "");
+    if (fromQuery) {
+      localStorage.setItem(LS_KEY, fromQuery);
+      return fromQuery;
+    }
     return (localStorage.getItem(LS_KEY) || window.OCR_BACKEND_URL || "http://127.0.0.1:8010").replace(/\/$/, "");
   }
 

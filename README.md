@@ -47,16 +47,33 @@ Open:
 - Frontend reads backend URL from `config.js` (`window.OCR_BACKEND_URL`)
 - You can override at runtime from the index page and save in localStorage.
 
-## Deploy backend (Render recommended)
+## No-account sharing mode (free)
 
-This repo includes `render.yaml`. Create a Render web service from this repo:
+If you do not want to create any backend service account, use local backend + temporary tunnel.
+
+```bash
+bash ./scripts/share_demo_no_account.sh
+```
+
+This prints:
+- a public backend URL (temporary)
+- a frontend URL already wired with `?backend=...`
+
+Stop tunnel + backend:
+
+```bash
+bash ./scripts/stop_share_demo.sh
+```
+
+## Render deployment (optional)
+
+This repo includes `render.yaml`. If you want a persistent hosted backend later:
 - Build: `pip install -r backend/requirements.txt`
 - Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-
-Then set `window.OCR_BACKEND_URL` in `config.js` to your Render URL and push.
 
 ## Security Notes (demo-light)
 
 - CORS limited to GitHub Pages + localhost defaults
 - File type and size validation in `/scan`
 - Reset route uses confirmation token (`RESET_DEMO`)
+- In no-account tunnel mode, backend data stays on your local machine (SQLite local), traffic is relayed through tunnel provider.
