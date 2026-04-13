@@ -907,7 +907,13 @@ async def scan(file: UploadFile = File(...)):
         pipeline_notes.append(llm_error)
 
     extracted_container = (llm_structured or {}).get("containerNo") or (containers[0] if containers else "")
-    extracted_date = (llm_structured or {}).get("date") or (dates[0] if dates else dt.datetime.now().strftime("%m/%d/%Y"))
+
+    llm_date = (llm_structured or {}).get("date") or ""
+    if dates:
+        extracted_date = llm_date if llm_date in dates else dates[0]
+    else:
+        # If OCR found no explicit date, default to current date for deterministic MVP behavior.
+        extracted_date = dt.datetime.now().strftime("%m/%d/%Y")
 
     issues = []
     if not containers and not extracted_container:
