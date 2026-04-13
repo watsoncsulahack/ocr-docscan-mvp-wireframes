@@ -1,5 +1,7 @@
 # Runtime data
 data/*.sqlite
+data/runtime/*
+!data/runtime/.gitkeep
 uploads/*
 !uploads/.gitkeep
 
@@ -9,3 +11,4 @@ backend/__pycache__/
 
 # Local env
 .venv/
+.env

@@ -10,7 +10,7 @@ This repo now includes:
 - Camera/image upload from phone browser
 - PDF upload support with digital-text parsing fallback
 - `/scan` endpoint with hybrid extraction pipeline:
-  - PDF digital parsers: `pdfplumber` / `PyMuPDF`
+  - PDF digital parsers: `pypdf` / `pdfplumber` / `PyMuPDF`
   - OCR engine: `Tesseract`
   - optional OCR engine: `DocTR` (feature-flagged)
   - LLM post-processing block for final structured extraction
@@ -35,10 +35,12 @@ This repo now includes:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
-# OCR binary required for full image OCR:
-# Ubuntu/Debian: sudo apt-get install -y tesseract-ocr
+# Optional local OCR stack (heavier; not required for cloud OCR mode):
+# pip install -r backend/requirements-optional-local-ocr.txt
 # Optional alternative OCR engine:
 # pip install -r backend/requirements-optional-doctr.txt
+# OCR binary required only for local Tesseract mode:
+# Ubuntu/Debian: sudo apt-get install -y tesseract-ocr
 uvicorn backend.main:app --reload --port 8010
 ```
 
@@ -69,6 +71,16 @@ This prints:
 - a public backend URL (temporary)
 - a frontend URL already wired with `?backend=...`
 
+It also writes runtime helper files used by the Web Studio control panel:
+- `data/runtime/local_backend_url.txt`
+- `data/runtime/public_backend_url.txt`
+- `data/runtime/public_backend_url.meta`
+
+Notes:
+- Script now avoids re-installing Python deps on every run.
+- For low-memory Termux devices, keep defaults (cloud OCR/LLM providers) and avoid optional local OCR deps.
+- To follow tunnel logs interactively: `OCR_MVP_FOLLOW_LOG=1 bash ./scripts/share_demo_no_account.sh`
+
 Stop tunnel + backend:
 
 ```bash
@@ -81,13 +93,74 @@ This repo includes `render.yaml`. If you want a persistent hosted backend later:
 - Build: `pip install -r backend/requirements.txt`
 - Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
 
+## Gemini quick wiring
+
+Set key once (stored in `.env`, loaded automatically by `scripts/start_backend_local.sh`):
+
+```bash
+bash ./scripts/set_gemini_key.sh
+```
+
+Or pass key inline:
+
+```bash
+bash ./scripts/set_gemini_key.sh "AIza..."
+```
+
+Then run share mode:
+
+```bash
+bash ./scripts/share_demo_no_account.sh
+```
+
+## Website control panel
+
+`index.html` now includes:
+- one-tap local actions (start backend, start/stop share tunnel, refresh generated URL)
+- generated backend URL display (read from runtime files)
+- Render/tunnel backend -> GitHub Pages URL generator (backend URL only input)
+- Gemini one-tap key apply (local backend control API)
+- Gemini fallback command generator for Termux
+
 ## Runtime flags
 
-- `ENABLE_LLM_POSTPROCESS=1` (default) : enable LLM JSON extraction post-process
-- `LLM_BASE_URL=http://127.0.0.1:18084` : OpenAI-compatible local endpoint
-- `LLM_MODEL=<optional>` : override model id
-- `LLM_INCLUDE_IMAGE=1` : include image payload in LLM request when possible
-- `ENABLE_DOCTR=1` : enable DocTR OCR path if installed
+### Provider selection
+
+- `OCR_PROVIDER=ocrspace` (recommended for live demos; backend default is `auto`)
+  - options: `ocrspace`, `local`, `auto`, `none`
+- `LLM_PROVIDER=gemini` (recommended for live demos)
+  - options: `gemini`, `openai`, `none`
+
+### OCR.Space
+
+- `OCR_SPACE_API_KEY=<key>` (defaults to `helloworld` if unset, limited)
+- `OCR_SPACE_ENGINE=2`
+- `OCR_SPACE_LANGUAGE=eng`
+- `OCR_TIMEOUT_SEC=25`
+
+### Gemini Flash
+
+- `GEMINI_API_KEY=<key>` (or `GOOGLE_API_KEY`)
+- `GEMINI_MODEL=gemini-2.0-flash`
+- `LLM_TIMEOUT_SEC=25`
+- `LLM_INCLUDE_IMAGE=1`
+
+### Local control API (for Web Studio one-tap actions)
+
+- `ENABLE_LOCAL_CONTROL_API=1` enabled by default in `scripts/start_backend_local.sh`
+- endpoint: `POST /control/local/gemini-key` with JSON `{ "apiKey": "..." }`
+
+### Existing/local OpenAI-compatible mode
+
+- `ENABLE_LLM_POSTPROCESS=1` (default)
+- `LLM_BASE_URL=http://127.0.0.1:18084`
+- `LLM_MODEL=<optional>`
+
+### Optional local OCR extras
+
+- `OCR_MVP_INSTALL_LOCAL_OCR=1` installs `backend/requirements-optional-local-ocr.txt`
+- `OCR_MVP_INSTALL_DOCTR=1` installs `backend/requirements-optional-doctr.txt`
+- `ENABLE_DOCTR=1` enables DocTR usage at runtime
 
 ## Security Notes (demo-light)
 

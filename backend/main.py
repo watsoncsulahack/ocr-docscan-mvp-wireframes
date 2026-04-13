@@ -36,6 +36,11 @@ except Exception:  # pragma: no cover
     fitz = None
 
 try:
+    from pypdf import PdfReader
+except Exception:  # pragma: no cover
+    PdfReader = None
+
+try:
     from doctr.io import DocumentFile
     from doctr.models import ocr_predictor
 except Exception:  # pragma: no cover
@@ -53,6 +58,10 @@ APP_ORIGINS = [
     "https://watsoncsulahack.github.io",
     "http://127.0.0.1:8080",
     "http://localhost:8080",
+    "http://127.0.0.1:8099",
+    "http://localhost:8099",
+    "http://127.0.0.1:8113",
+    "http://localhost:8113",
 ]
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
@@ -98,6 +107,10 @@ DOCTR_MODEL = None
 LLM_MODEL_CACHE = None
 
 
+def env_bool(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -121,6 +134,33 @@ def init_db() -> None:
     )
     conn.commit()
     conn.close()
+
+
+def upsert_env_values(path: Path, values: dict) -> None:
+    lines: List[str] = []
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+
+    seen = set()
+    out: List[str] = []
+    for line in lines:
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in line:
+            out.append(line)
+            continue
+        k, _ = line.split("=", 1)
+        key = k.strip()
+        if key in values:
+            out.append(f"{key}={values[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+
+    for key, value in values.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+
+    path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
 
 
 def normalize_container(value: str) -> str:
@@ -245,6 +285,17 @@ def extract_pdf_text_and_image(raw: bytes) -> Tuple[str, Optional[object], List[
     notes: List[str] = []
     text_parts: List[str] = []
     first_page_image = None
+
+    if PdfReader is not None:
+        try:
+            reader = PdfReader(io.BytesIO(raw))
+            for page in reader.pages[:3]:
+                t = page.extract_text() or ""
+                if t.strip():
+                    text_parts.append(t)
+            notes.append("pypdf_text")
+        except Exception:
+            notes.append("pypdf_failed")
 
     if pdfplumber is not None:
         try:
@@ -371,6 +422,112 @@ def run_doctr(image_path: Path) -> Tuple[List[str], bool, Optional[str]]:
         return [], False, f"doctr_error:{err}"
 
 
+def pil_to_jpeg_bytes(image) -> Optional[bytes]:
+    if image is None or Image is None:
+        return None
+    try:
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=92)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def resolve_ocr_provider_chain() -> List[str]:
+    provider = os.getenv("OCR_PROVIDER", "auto").strip().lower()
+    chain: List[str] = []
+
+    if provider in ("none", "off", "disabled"):
+        return chain
+
+    if provider in ("ocrspace", "ocr_space"):
+        chain = ["ocrspace"]
+        if env_bool("OCR_FALLBACK_LOCAL", "1"):
+            chain.append("local")
+    elif provider == "auto":
+        chain = ["ocrspace", "local"]
+    else:
+        chain = ["local"]
+        if env_bool("OCR_FALLBACK_OCRSPACE", "0"):
+            chain.append("ocrspace")
+
+    # de-dup while preserving order
+    seen = set()
+    out: List[str] = []
+    for item in chain:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _encode_multipart(fields: dict, file_field: str, filename: str, file_bytes: bytes, content_type: str) -> Tuple[bytes, str]:
+    boundary = f"----OpenClawBoundary{uuid.uuid4().hex}"
+    parts: List[bytes] = []
+    for key, value in fields.items():
+        parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        parts.append(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
+        parts.append(str(value).encode("utf-8"))
+        parts.append(b"\r\n")
+
+    parts.append(f"--{boundary}\r\n".encode("utf-8"))
+    parts.append(
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("utf-8")
+    )
+    parts.append(f"Content-Type: {content_type or 'application/octet-stream'}\r\n\r\n".encode("utf-8"))
+    parts.append(file_bytes)
+    parts.append(b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(parts), boundary
+
+
+def run_ocrspace(file_bytes: bytes, filename: str, content_type: str) -> Tuple[List[str], bool, Optional[str]]:
+    endpoint = os.getenv("OCR_SPACE_ENDPOINT", "https://api.ocr.space/parse/image").strip()
+    api_key = os.getenv("OCR_SPACE_API_KEY", "helloworld").strip() or "helloworld"
+    language = os.getenv("OCR_SPACE_LANGUAGE", "eng").strip() or "eng"
+    ocr_engine = os.getenv("OCR_SPACE_ENGINE", "2").strip() or "2"
+
+    fields = {
+        "apikey": api_key,
+        "language": language,
+        "OCREngine": ocr_engine,
+        "scale": "true",
+        "isOverlayRequired": "false",
+    }
+
+    body, boundary = _encode_multipart(fields, "file", filename, file_bytes, content_type)
+    req = url_request.Request(
+        endpoint,
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+
+    try:
+        with url_request.urlopen(req, timeout=int(os.getenv("OCR_TIMEOUT_SEC", "25"))) as res:
+            payload = json.loads(res.read().decode("utf-8", "ignore"))
+
+        parsed_results = payload.get("ParsedResults") or []
+        texts: List[str] = []
+        for item in parsed_results:
+            txt = str(item.get("ParsedText") or "").strip()
+            if txt:
+                texts.append(txt)
+
+        if texts:
+            return texts, True, None
+
+        errors = payload.get("ErrorMessage") or payload.get("ErrorDetails") or ""
+        if isinstance(errors, list):
+            errors = "; ".join([str(e) for e in errors if e])
+        return [], False, f"ocrspace_no_text:{errors or 'unknown'}"
+    except url_error.HTTPError as err:
+        return [], False, f"ocrspace_http_{err.code}"
+    except Exception as err:
+        return [], False, f"ocrspace_error:{err}"
+
+
 def extract_json_object(text: str) -> Optional[dict]:
     if not text:
         return None
@@ -399,26 +556,39 @@ def resolve_llm_model(base_url: str) -> Optional[str]:
     return LLM_MODEL_CACHE
 
 
-def llm_postprocess(raw_text: str, containers: List[str], dates: List[str], image_bytes: Optional[bytes]) -> Tuple[Optional[dict], Optional[str]]:
-    if os.getenv("ENABLE_LLM_POSTPROCESS", "1") != "1":
-        return None, "llm_disabled"
+def build_llm_prompt(raw_text: str, containers: List[str], dates: List[str]) -> str:
+    return (
+        "Extract containerNo and date (MM/DD/YYYY) from OCR text. "
+        "Container should follow ISO 6346 (AAAA1234567). "
+        "Return strict JSON only with keys: containerNo, date."
+        f"\n\nOCR TEXT:\n{raw_text[:3000]}"
+        f"\n\nCANDIDATE CONTAINERS: {containers}"
+        f"\nCANDIDATE DATES: {dates}"
+    )
 
+
+def normalize_llm_output(parsed: dict) -> dict:
+    out = {
+        "containerNo": normalize_container(str(parsed.get("containerNo", ""))),
+        "date": str(parsed.get("date", "")).strip(),
+    }
+    if out["containerNo"] and not valid_container(out["containerNo"]):
+        out["containerNo"] = ""
+    if out["date"] and not valid_date(out["date"]):
+        out["date"] = ""
+    return out
+
+
+def llm_postprocess_openai(
+    raw_text: str, containers: List[str], dates: List[str], image_bytes: Optional[bytes]
+) -> Tuple[Optional[dict], Optional[str]]:
     base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:18084").rstrip("/")
     model = os.getenv("LLM_MODEL", "").strip() or resolve_llm_model(base_url)
     if not model:
         return None, "llm_model_unavailable"
 
-    prompt = (
-        "Extract containerNo and date (MM/DD/YYYY) from OCR text. "
-        "Container should follow ISO 6346 (AAAA1234567). "
-        "Return strict JSON with keys: containerNo, date."
-        f"\n\nOCR TEXT:\n{raw_text[:2000]}"
-        f"\n\nCANDIDATE CONTAINERS: {containers}"
-        f"\nCANDIDATE DATES: {dates}"
-    )
-
-    content = [{"type": "text", "text": prompt}]
-    if image_bytes and os.getenv("LLM_INCLUDE_IMAGE", "1") == "1":
+    content = [{"type": "text", "text": build_llm_prompt(raw_text, containers, dates)}]
+    if image_bytes and env_bool("LLM_INCLUDE_IMAGE", "1"):
         b64 = base64.b64encode(image_bytes).decode("ascii")
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
@@ -438,7 +608,7 @@ def llm_postprocess(raw_text: str, containers: List[str], dates: List[str], imag
         method="POST",
     )
     try:
-        with url_request.urlopen(req, timeout=25) as res:
+        with url_request.urlopen(req, timeout=int(os.getenv("LLM_TIMEOUT_SEC", "25"))) as res:
             body = json.loads(res.read().decode("utf-8", "ignore"))
         text = (
             (((body.get("choices") or [{}])[0].get("message") or {}).get("content"))
@@ -448,20 +618,82 @@ def llm_postprocess(raw_text: str, containers: List[str], dates: List[str], imag
         parsed = extract_json_object(text if isinstance(text, str) else "")
         if not parsed:
             return None, "llm_json_parse_failed"
-
-        out = {
-            "containerNo": normalize_container(str(parsed.get("containerNo", ""))),
-            "date": str(parsed.get("date", "")).strip(),
-        }
-        if out["containerNo"] and not valid_container(out["containerNo"]):
-            out["containerNo"] = ""
-        if out["date"] and not valid_date(out["date"]):
-            out["date"] = ""
-        return out, None
+        return normalize_llm_output(parsed), None
     except url_error.HTTPError as err:
         return None, f"llm_http_{err.code}"
     except Exception as err:
         return None, f"llm_error:{err}"
+
+
+def llm_postprocess_gemini(
+    raw_text: str, containers: List[str], dates: List[str], image_bytes: Optional[bytes], image_mime: str
+) -> Tuple[Optional[dict], Optional[str]]:
+    api_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    if not api_key:
+        return None, "gemini_api_key_missing"
+
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    parts = [{"text": build_llm_prompt(raw_text, containers, dates)}]
+    if image_bytes and env_bool("LLM_INCLUDE_IMAGE", "1"):
+        parts.append(
+            {
+                "inline_data": {
+                    "mime_type": image_mime or "image/jpeg",
+                    "data": base64.b64encode(image_bytes).decode("ascii"),
+                }
+            }
+        )
+
+    payload = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
+    }
+
+    req = url_request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with url_request.urlopen(req, timeout=int(os.getenv("LLM_TIMEOUT_SEC", "25"))) as res:
+            body = json.loads(res.read().decode("utf-8", "ignore"))
+
+        text_bits: List[str] = []
+        for cand in body.get("candidates") or []:
+            for part in ((cand.get("content") or {}).get("parts") or []):
+                t = part.get("text")
+                if isinstance(t, str) and t.strip():
+                    text_bits.append(t)
+
+        parsed = extract_json_object("\n".join(text_bits))
+        if not parsed:
+            return None, "llm_json_parse_failed"
+        return normalize_llm_output(parsed), None
+    except url_error.HTTPError as err:
+        return None, f"gemini_http_{err.code}"
+    except Exception as err:
+        return None, f"gemini_error:{err}"
+
+
+def llm_postprocess(
+    raw_text: str,
+    containers: List[str],
+    dates: List[str],
+    image_bytes: Optional[bytes],
+    image_mime: str,
+) -> Tuple[Optional[dict], Optional[str]]:
+    if not env_bool("ENABLE_LLM_POSTPROCESS", "1"):
+        return None, "llm_disabled"
+
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    if provider in ("none", "off", "disabled"):
+        return None, "llm_disabled"
+    if provider in ("gemini", "google", "gemini_flash"):
+        return llm_postprocess_gemini(raw_text, containers, dates, image_bytes, image_mime)
+    return llm_postprocess_openai(raw_text, containers, dates, image_bytes)
 
 
 class RecordIn(BaseModel):
@@ -469,6 +701,10 @@ class RecordIn(BaseModel):
     date: str
     sourceFileName: Optional[str] = None
     corrected: bool = False
+
+
+class LocalGeminiConfigIn(BaseModel):
+    apiKey: str = Field(min_length=8, max_length=256)
 
 
 app = FastAPI(title="OCR DocScan MVP Backend", version="0.3.0")
@@ -492,9 +728,14 @@ def health():
         "ok": True,
         "service": "ocr-docscan-mvp-backend",
         "time": now_iso(),
+        "ocrProvider": os.getenv("OCR_PROVIDER", "auto"),
+        "llmProvider": os.getenv("LLM_PROVIDER", "openai"),
         "ocrLibrariesAvailable": bool(Image is not None and pytesseract is not None),
-        "pdfParserAvailable": bool(pdfplumber is not None or fitz is not None),
+        "pdfParserAvailable": bool(PdfReader is not None or pdfplumber is not None or fitz is not None),
         "doctrAvailable": bool(DocumentFile is not None and ocr_predictor is not None),
+        "ocrSpaceApiKeySet": bool(os.getenv("OCR_SPACE_API_KEY")),
+        "geminiApiKeySet": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+        "localControlApi": env_bool("ENABLE_LOCAL_CONTROL_API", "0"),
     }
 
 
@@ -536,19 +777,51 @@ async def scan(file: UploadFile = File(...)):
                 image_for_ocr = None
         pipeline_notes.append("input_image")
 
-    tesseract_texts, tess_ok, tess_err = run_tesseract(image_for_ocr)
-    if tess_ok:
-        pipeline_notes.append("ocr_tesseract")
-        raw_text_parts.extend(tesseract_texts)
-    elif tess_err:
-        pipeline_notes.append(tess_err)
+    tess_ok = False
+    doctr_ok = False
+    ocrspace_ok = False
 
-    doctr_texts, doctr_ok, doctr_err = run_doctr(temp_path)
-    if doctr_ok and doctr_texts:
-        pipeline_notes.append("ocr_doctr")
-        raw_text_parts.extend(doctr_texts)
-    elif doctr_err and doctr_err not in ("doctr_disabled", "doctr_dependency_missing"):
-        pipeline_notes.append(doctr_err)
+    ocr_chain = resolve_ocr_provider_chain()
+    for ocr_provider in ocr_chain:
+        if ocr_provider == "ocrspace":
+            ocr_input = raw
+            ocr_filename = filename
+            ocr_content_type = ctype or ("application/pdf" if is_pdf else "image/jpeg")
+            if is_pdf and image_for_ocr is not None and env_bool("OCR_SPACE_USE_RASTER_FOR_PDF", "0"):
+                raster = pil_to_jpeg_bytes(image_for_ocr)
+                if raster:
+                    ocr_input = raster
+                    ocr_filename = f"{Path(filename).stem}.jpg"
+                    ocr_content_type = "image/jpeg"
+            ocrspace_texts, ok, err = run_ocrspace(ocr_input, ocr_filename, ocr_content_type)
+            if ok and ocrspace_texts:
+                ocrspace_ok = True
+                pipeline_notes.append("ocr_ocrspace")
+                raw_text_parts.extend(ocrspace_texts)
+                if env_bool("OCR_STOP_ON_FIRST_SUCCESS", "1"):
+                    break
+            elif err:
+                pipeline_notes.append(err)
+
+        elif ocr_provider == "local":
+            tesseract_texts, t_ok, tess_err = run_tesseract(image_for_ocr)
+            if t_ok and tesseract_texts:
+                tess_ok = True
+                pipeline_notes.append("ocr_tesseract")
+                raw_text_parts.extend(tesseract_texts)
+            elif tess_err:
+                pipeline_notes.append(tess_err)
+
+            doctr_texts, d_ok, doctr_err = run_doctr(temp_path)
+            if d_ok and doctr_texts:
+                doctr_ok = True
+                pipeline_notes.append("ocr_doctr")
+                raw_text_parts.extend(doctr_texts)
+            elif doctr_err and doctr_err not in ("doctr_disabled", "doctr_dependency_missing"):
+                pipeline_notes.append(doctr_err)
+
+            if (tess_ok or doctr_ok) and env_bool("OCR_STOP_ON_FIRST_SUCCESS", "1"):
+                break
 
     raw_text_parts.append(filename)
     raw_text = "\n".join([p for p in raw_text_parts if p]).strip()
@@ -556,7 +829,10 @@ async def scan(file: UploadFile = File(...)):
     containers = extract_container_candidates(raw_text)
     dates = extract_date_candidates(raw_text)
 
-    llm_structured, llm_error = llm_postprocess(raw_text, containers, dates, raw if is_image else None)
+    llm_image_bytes = raw if is_image else pil_to_jpeg_bytes(image_for_ocr)
+    llm_image_mime = ctype if is_image else "image/jpeg"
+
+    llm_structured, llm_error = llm_postprocess(raw_text, containers, dates, llm_image_bytes, llm_image_mime)
     if llm_structured:
         pipeline_notes.append("llm_postprocess")
     elif llm_error:
@@ -576,7 +852,7 @@ async def scan(file: UploadFile = File(...)):
     elif len(dates) > 1:
         issues.append("multiple_date_matches")
 
-    if not tess_ok and not doctr_ok and not (is_pdf and raw_text):
+    if not tess_ok and not doctr_ok and not ocrspace_ok and not (is_pdf and raw_text):
         issues.append("ocr_engine_unavailable")
 
     candidate_details = [{"value": c, "iso6346Valid": iso6346_is_valid(c)} for c in containers]
@@ -593,6 +869,39 @@ async def scan(file: UploadFile = File(...)):
         "ocrMode": "hybrid_pipeline",
         "rawTextPreview": raw_text[:1200],
         "pipeline": pipeline_notes,
+    }
+
+
+@app.post("/control/local/gemini-key")
+def set_local_gemini_key(payload: LocalGeminiConfigIn):
+    if not env_bool("ENABLE_LOCAL_CONTROL_API", "0"):
+        raise HTTPException(status_code=403, detail="Local control API disabled")
+
+    key = (payload.apiKey or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Gemini key is required")
+
+    env_path = ROOT / ".env"
+    upsert_env_values(
+        env_path,
+        {
+            "GEMINI_API_KEY": key,
+            "LLM_PROVIDER": "gemini",
+            "OCR_PROVIDER": "ocrspace",
+            "ENABLE_LLM_POSTPROCESS": "1",
+        },
+    )
+
+    try:
+        os.chmod(env_path, 0o600)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "message": "Gemini key saved to .env",
+        "path": str(env_path),
+        "providers": {"ocr": "ocrspace", "llm": "gemini"},
     }
 
 

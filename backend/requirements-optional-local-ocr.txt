@@ -1,0 +1,5 @@
+# Optional: local OCR/PDF vision dependencies (heavier)
+pillow==10.4.0
+pytesseract==0.3.13
+pdfplumber==0.11.4
+pymupdf==1.24.10
