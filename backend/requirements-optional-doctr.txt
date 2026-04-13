@@ -1,0 +1,3 @@
+# Optional: alternative OCR engine (DocTR)
+# Install only if your host can support torch/doctr footprint.
+python-doctr[torch]==0.10.0

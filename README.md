@@ -8,7 +8,13 @@ This repo now includes:
 ## Current Demo Scope
 
 - Camera/image upload from phone browser
-- `/scan` endpoint with simple OCR pipeline + ISO 6346-aware container candidate ranking
+- PDF upload support with digital-text parsing fallback
+- `/scan` endpoint with hybrid extraction pipeline:
+  - PDF digital parsers: `pdfplumber` / `PyMuPDF`
+  - OCR engine: `Tesseract`
+  - optional OCR engine: `DocTR` (feature-flagged)
+  - LLM post-processing block for final structured extraction
+- ISO 6346-aware container normalization, correction, and ranking
 - Review/correct fields
 - Save to SQLite (`containerNo`, `date`, `sourceFileName`, `corrected`, `createdAt`)
 - Records table reflects backend data
@@ -31,6 +37,8 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 # OCR binary required for full image OCR:
 # Ubuntu/Debian: sudo apt-get install -y tesseract-ocr
+# Optional alternative OCR engine:
+# pip install -r backend/requirements-optional-doctr.txt
 uvicorn backend.main:app --reload --port 8010
 ```
 
@@ -72,6 +80,14 @@ bash ./scripts/stop_share_demo.sh
 This repo includes `render.yaml`. If you want a persistent hosted backend later:
 - Build: `pip install -r backend/requirements.txt`
 - Start: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
+
+## Runtime flags
+
+- `ENABLE_LLM_POSTPROCESS=1` (default) : enable LLM JSON extraction post-process
+- `LLM_BASE_URL=http://127.0.0.1:18084` : OpenAI-compatible local endpoint
+- `LLM_MODEL=<optional>` : override model id
+- `LLM_INCLUDE_IMAGE=1` : include image payload in LLM request when possible
+- `ENABLE_DOCTR=1` : enable DocTR OCR path if installed
 
 ## Security Notes (demo-light)
 

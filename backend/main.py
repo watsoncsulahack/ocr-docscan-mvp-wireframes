@@ -1,24 +1,46 @@
+import base64
 import datetime as dt
 import io
+import json
+import os
 import re
 import sqlite3
 import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib import error as url_error
+from urllib import request as url_request
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 try:
-    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-except Exception:  # pragma: no cover - runtime dependency check
+    from PIL import Image, ImageEnhance, ImageOps
+except Exception:  # pragma: no cover
     Image = None
 
 try:
     import pytesseract
-except Exception:  # pragma: no cover - runtime dependency check
+except Exception:  # pragma: no cover
     pytesseract = None
+
+try:
+    import pdfplumber
+except Exception:  # pragma: no cover
+    pdfplumber = None
+
+try:
+    import fitz  # PyMuPDF
+except Exception:  # pragma: no cover
+    fitz = None
+
+try:
+    from doctr.io import DocumentFile
+    from doctr.models import ocr_predictor
+except Exception:  # pragma: no cover
+    DocumentFile = None
+    ocr_predictor = None
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -66,6 +88,15 @@ ISO6346_LETTER_VALUES = {
     "Z": 38,
 }
 
+OWNER_ALIAS = {
+    "SKUU": "SKYU",
+    "SKU": "SKYU",
+    "SKY": "SKYU",
+}
+
+DOCTR_MODEL = None
+LLM_MODEL_CACHE = None
+
 
 def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -93,7 +124,16 @@ def init_db() -> None:
 
 
 def normalize_container(value: str) -> str:
-    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+    text = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+    if len(text) >= 4:
+        prefix = text[:4]
+        if prefix in OWNER_ALIAS:
+            text = OWNER_ALIAS[prefix] + text[4:]
+    if len(text) >= 3:
+        # handle 3-letter owner code where category is dropped (common OCR issue)
+        if re.fullmatch(r"[A-Z]{3}[0-9]{7}", text):
+            text = OWNER_ALIAS.get(text[:3], text[:3] + "U") + text[3:]
+    return text
 
 
 def valid_container(value: str) -> bool:
@@ -135,13 +175,11 @@ def iso6346_is_valid(container: str) -> bool:
 
 
 def _ocr_letters(token: str) -> str:
-    # convert common OCR digit confusions in owner/equipment letters
     table = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "6": "G", "8": "B"})
     return token.translate(table)
 
 
 def _ocr_digits(token: str) -> str:
-    # convert common OCR letter confusions in numeric sections
     table = str.maketrans({"O": "0", "Q": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "B": "8"})
     return token.translate(table)
 
@@ -154,32 +192,30 @@ def extract_container_candidates(raw_text: str) -> List[str]:
     candidates.extend(CONTAINER_RE.findall(text))
 
     # spaced variants: SKYU 400093 2 or SKYU 4000932
-    for m in re.finditer(r"\b([A-Z0-9]{4})\s*([0-9A-Z]{6})\s*([0-9A-Z])\b", text):
+    for m in re.finditer(r"\b([A-Z0-9]{3,4})\s*([0-9A-Z]{6})\s*([0-9A-Z])\b", text):
         p1 = _ocr_letters(m.group(1))
         p2 = _ocr_digits(m.group(2))
         p3 = _ocr_digits(m.group(3))
         candidates.append(f"{p1}{p2}{p3}")
 
-    for m in re.finditer(r"\b([A-Z0-9]{4})\s*([0-9A-Z]{7})\b", text):
+    for m in re.finditer(r"\b([A-Z0-9]{3,4})\s*([0-9A-Z]{7})\b", text):
         p1 = _ocr_letters(m.group(1))
         p2 = _ocr_digits(m.group(2))
         candidates.append(f"{p1}{p2}")
 
-    # token window fallback
     tokens = re.findall(r"[A-Z0-9]+", text)
     for i in range(len(tokens) - 1):
         t1 = _ocr_letters(tokens[i])
         t2 = _ocr_digits(tokens[i + 1])
-        if re.fullmatch(r"[A-Z]{4}", t1) and re.fullmatch(r"[0-9]{7}", t2):
+        if re.fullmatch(r"[A-Z]{3,4}", t1) and re.fullmatch(r"[0-9]{7}", t2):
             candidates.append(t1 + t2)
     for i in range(len(tokens) - 2):
         t1 = _ocr_letters(tokens[i])
         t2 = _ocr_digits(tokens[i + 1])
         t3 = _ocr_digits(tokens[i + 2])
-        if re.fullmatch(r"[A-Z]{4}", t1) and re.fullmatch(r"[0-9]{6}", t2) and re.fullmatch(r"[0-9]", t3):
+        if re.fullmatch(r"[A-Z]{3,4}", t1) and re.fullmatch(r"[0-9]{6}", t2) and re.fullmatch(r"[0-9]", t3):
             candidates.append(t1 + t2 + t3)
 
-    # dedupe + rank (ISO valid first)
     seen = set()
     uniq: List[str] = []
     for c in candidates:
@@ -205,11 +241,46 @@ def extract_date_candidates(raw_text: str) -> List[str]:
     return out
 
 
+def extract_pdf_text_and_image(raw: bytes) -> Tuple[str, Optional[object], List[str]]:
+    notes: List[str] = []
+    text_parts: List[str] = []
+    first_page_image = None
+
+    if pdfplumber is not None:
+        try:
+            with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                for page in pdf.pages[:3]:
+                    t = page.extract_text() or ""
+                    if t.strip():
+                        text_parts.append(t)
+            notes.append("pdfplumber_text")
+        except Exception:
+            notes.append("pdfplumber_failed")
+
+    if fitz is not None:
+        try:
+            doc = fitz.open(stream=raw, filetype="pdf")
+            for i in range(min(3, len(doc))):
+                t = doc.load_page(i).get_text("text") or ""
+                if t.strip():
+                    text_parts.append(t)
+            notes.append("pymupdf_text")
+
+            if len(doc) > 0 and Image is not None:
+                pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2, 2))
+                first_page_image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+                notes.append("pymupdf_rasterized_page0")
+        except Exception:
+            notes.append("pymupdf_failed")
+
+    joined = "\n".join([p for p in text_parts if p.strip()]).strip()
+    return joined, first_page_image, notes
+
+
 def candidate_regions(image):
     if image is None:
         return []
 
-    # keep OCR cost bounded for mobile/demo workloads
     max_w = 1600
     if image.width > max_w:
         ratio = max_w / float(image.width)
@@ -269,7 +340,6 @@ def run_tesseract(image) -> Tuple[List[str], bool, Optional[str]]:
             return [], False, "tesseract_binary_missing"
         return [], False, f"ocr_error:{err}"
 
-    # dedupe
     uniq = []
     seen = set()
     for t in texts:
@@ -282,14 +352,126 @@ def run_tesseract(image) -> Tuple[List[str], bool, Optional[str]]:
     return uniq, True, None
 
 
+def run_doctr(image_path: Path) -> Tuple[List[str], bool, Optional[str]]:
+    global DOCTR_MODEL
+    if DocumentFile is None or ocr_predictor is None:
+        return [], False, "doctr_dependency_missing"
+
+    if os.getenv("ENABLE_DOCTR", "0") != "1":
+        return [], False, "doctr_disabled"
+
+    try:
+        if DOCTR_MODEL is None:
+            DOCTR_MODEL = ocr_predictor(pretrained=True)
+        doc = DocumentFile.from_images(str(image_path))
+        result = DOCTR_MODEL(doc)
+        txt = (result.render() or "").strip()
+        return ([txt] if txt else []), True, None
+    except Exception as err:
+        return [], False, f"doctr_error:{err}"
+
+
+def extract_json_object(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, flags=re.S)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+def resolve_llm_model(base_url: str) -> Optional[str]:
+    global LLM_MODEL_CACHE
+    if LLM_MODEL_CACHE:
+        return LLM_MODEL_CACHE
+    try:
+        req = url_request.Request(f"{base_url}/v1/models", headers={"Content-Type": "application/json"})
+        with url_request.urlopen(req, timeout=10) as res:
+            data = json.loads(res.read().decode("utf-8", "ignore"))
+        models = data.get("data") or []
+        if models:
+            LLM_MODEL_CACHE = models[0].get("id")
+    except Exception:
+        return None
+    return LLM_MODEL_CACHE
+
+
+def llm_postprocess(raw_text: str, containers: List[str], dates: List[str], image_bytes: Optional[bytes]) -> Tuple[Optional[dict], Optional[str]]:
+    if os.getenv("ENABLE_LLM_POSTPROCESS", "1") != "1":
+        return None, "llm_disabled"
+
+    base_url = os.getenv("LLM_BASE_URL", "http://127.0.0.1:18084").rstrip("/")
+    model = os.getenv("LLM_MODEL", "").strip() or resolve_llm_model(base_url)
+    if not model:
+        return None, "llm_model_unavailable"
+
+    prompt = (
+        "Extract containerNo and date (MM/DD/YYYY) from OCR text. "
+        "Container should follow ISO 6346 (AAAA1234567). "
+        "Return strict JSON with keys: containerNo, date."
+        f"\n\nOCR TEXT:\n{raw_text[:2000]}"
+        f"\n\nCANDIDATE CONTAINERS: {containers}"
+        f"\nCANDIDATE DATES: {dates}"
+    )
+
+    content = [{"type": "text", "text": prompt}]
+    if image_bytes and os.getenv("LLM_INCLUDE_IMAGE", "1") == "1":
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": "You extract logistics fields and return valid JSON only."},
+            {"role": "user", "content": content},
+        ],
+    }
+
+    req = url_request.Request(
+        f"{base_url}/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with url_request.urlopen(req, timeout=25) as res:
+            body = json.loads(res.read().decode("utf-8", "ignore"))
+        text = (
+            (((body.get("choices") or [{}])[0].get("message") or {}).get("content"))
+            if isinstance(body, dict)
+            else ""
+        )
+        parsed = extract_json_object(text if isinstance(text, str) else "")
+        if not parsed:
+            return None, "llm_json_parse_failed"
+
+        out = {
+            "containerNo": normalize_container(str(parsed.get("containerNo", ""))),
+            "date": str(parsed.get("date", "")).strip(),
+        }
+        if out["containerNo"] and not valid_container(out["containerNo"]):
+            out["containerNo"] = ""
+        if out["date"] and not valid_date(out["date"]):
+            out["date"] = ""
+        return out, None
+    except url_error.HTTPError as err:
+        return None, f"llm_http_{err.code}"
+    except Exception as err:
+        return None, f"llm_error:{err}"
+
+
 class RecordIn(BaseModel):
-    containerNo: str = Field(min_length=11, max_length=32)
+    containerNo: str = Field(min_length=1, max_length=32)
     date: str
     sourceFileName: Optional[str] = None
     corrected: bool = False
 
 
-app = FastAPI(title="OCR DocScan MVP Backend", version="0.2.0")
+app = FastAPI(title="OCR DocScan MVP Backend", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=APP_ORIGINS,
@@ -311,14 +493,20 @@ def health():
         "service": "ocr-docscan-mvp-backend",
         "time": now_iso(),
         "ocrLibrariesAvailable": bool(Image is not None and pytesseract is not None),
+        "pdfParserAvailable": bool(pdfplumber is not None or fitz is not None),
+        "doctrAvailable": bool(DocumentFile is not None and ocr_predictor is not None),
     }
 
 
 @app.post("/scan")
 async def scan(file: UploadFile = File(...)):
     ctype = (file.content_type or "").lower()
-    if not ctype.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image uploads are allowed in this demo.")
+    filename = Path(file.filename or "capture").name
+    is_pdf = ctype == "application/pdf" or filename.lower().endswith(".pdf")
+    is_image = ctype.startswith("image/") or filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp"))
+
+    if not (is_pdf or is_image):
+        raise HTTPException(status_code=400, detail="Only image or PDF uploads are allowed.")
 
     raw = await file.read()
     if not raw:
@@ -326,62 +514,85 @@ async def scan(file: UploadFile = File(...)):
     if len(raw) > MAX_FILE_BYTES:
         raise HTTPException(status_code=400, detail="File too large.")
 
-    safe_name = Path(file.filename or "capture.jpg").name
-    temp_name = f"{uuid.uuid4().hex[:12]}_{safe_name}"
+    temp_name = f"{uuid.uuid4().hex[:12]}_{filename}"
     temp_path = UPLOAD_DIR / temp_name
     temp_path.write_bytes(raw)
 
-    image = None
-    if Image is not None:
-        try:
-            image = Image.open(io.BytesIO(raw)).convert("RGB")
-        except Exception:
-            image = None
+    pipeline_notes: List[str] = []
+    raw_text_parts: List[str] = []
+    image_for_ocr = None
 
-    ocr_texts, ocr_ok, ocr_error = run_tesseract(image)
+    if is_pdf:
+        txt, first_img, notes = extract_pdf_text_and_image(raw)
+        raw_text_parts.append(txt)
+        pipeline_notes.extend(notes)
+        image_for_ocr = first_img
+        pipeline_notes.append("input_pdf")
+    else:
+        if Image is not None:
+            try:
+                image_for_ocr = Image.open(io.BytesIO(raw)).convert("RGB")
+            except Exception:
+                image_for_ocr = None
+        pipeline_notes.append("input_image")
 
-    # fallback keeps demo usable if OCR binary is unavailable
-    probe_text_parts = []
-    probe_text_parts.extend(ocr_texts)
-    probe_text_parts.append(safe_name)
-    probe_text = "\n".join(probe_text_parts)
+    tesseract_texts, tess_ok, tess_err = run_tesseract(image_for_ocr)
+    if tess_ok:
+        pipeline_notes.append("ocr_tesseract")
+        raw_text_parts.extend(tesseract_texts)
+    elif tess_err:
+        pipeline_notes.append(tess_err)
 
-    containers = extract_container_candidates(probe_text)
-    dates = extract_date_candidates(probe_text)
+    doctr_texts, doctr_ok, doctr_err = run_doctr(temp_path)
+    if doctr_ok and doctr_texts:
+        pipeline_notes.append("ocr_doctr")
+        raw_text_parts.extend(doctr_texts)
+    elif doctr_err and doctr_err not in ("doctr_disabled", "doctr_dependency_missing"):
+        pipeline_notes.append(doctr_err)
+
+    raw_text_parts.append(filename)
+    raw_text = "\n".join([p for p in raw_text_parts if p]).strip()
+
+    containers = extract_container_candidates(raw_text)
+    dates = extract_date_candidates(raw_text)
+
+    llm_structured, llm_error = llm_postprocess(raw_text, containers, dates, raw if is_image else None)
+    if llm_structured:
+        pipeline_notes.append("llm_postprocess")
+    elif llm_error:
+        pipeline_notes.append(llm_error)
+
+    extracted_container = (llm_structured or {}).get("containerNo") or (containers[0] if containers else "")
+    extracted_date = (llm_structured or {}).get("date") or (dates[0] if dates else dt.datetime.now().strftime("%m/%d/%Y"))
 
     issues = []
-    if not containers:
+    if not containers and not extracted_container:
         issues.append("no_container_found")
     elif len(containers) > 1:
         issues.append("multiple_container_matches")
 
-    if not dates:
+    if not dates and not valid_date(extracted_date):
         issues.append("invalid_or_missing_date")
     elif len(dates) > 1:
         issues.append("multiple_date_matches")
 
-    if not ocr_ok:
+    if not tess_ok and not doctr_ok and not (is_pdf and raw_text):
         issues.append("ocr_engine_unavailable")
 
-    extracted = {
-        "containerNo": containers[0] if containers else "",
-        "date": dates[0] if dates else dt.datetime.now().strftime("%m/%d/%Y"),
-    }
-
-    container_details = [{"value": c, "iso6346Valid": iso6346_is_valid(c)} for c in containers]
+    candidate_details = [{"value": c, "iso6346Valid": iso6346_is_valid(c)} for c in containers]
 
     return {
         "ok": True,
         "scanId": str(uuid.uuid4()),
-        "extracted": extracted,
+        "extracted": {"containerNo": extracted_container, "date": extracted_date},
         "candidates": {"containerNos": containers, "dates": dates},
-        "candidateDetails": {"containerNos": container_details},
+        "candidateDetails": {"containerNos": candidate_details},
         "issues": issues,
         "requiresReview": True,
-        "sourceFileName": safe_name,
-        "ocrMode": "tesseract_image" if ocr_ok else "fallback_filename_only",
-        "ocrError": ocr_error,
-        "rawTextPreview": "\n".join(ocr_texts)[:600],
+        "sourceFileName": filename,
+        "ocrMode": "hybrid_pipeline",
+        "rawTextPreview": raw_text[:1200],
+        "pipeline": pipeline_notes,
     }
 
 

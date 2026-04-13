@@ -79,11 +79,24 @@
     const dateInput = document.getElementById("eventDate");
     const confirmBtn = document.getElementById("confirmBtn");
     const msg = document.getElementById("reviewMsg");
+    const dbg = document.getElementById("scanDebug");
     if (!containerInput || !dateInput || !confirmBtn) return;
 
     const scan = JSON.parse(sessionStorage.getItem("ocr.scan") || "{}");
     containerInput.value = scan?.extracted?.containerNo || "";
     dateInput.value = scan?.extracted?.date || "";
+
+    if (dbg) {
+      const lines = [];
+      lines.push(`Pipeline: ${(scan?.pipeline || []).join(' -> ') || 'n/a'}`);
+      lines.push(`Issues: ${(scan?.issues || []).join(', ') || 'none'}`);
+      lines.push(`OCR mode: ${scan?.ocrMode || 'n/a'}`);
+      if (scan?.rawTextPreview) {
+        lines.push('Raw text preview:');
+        lines.push(scan.rawTextPreview);
+      }
+      dbg.textContent = lines.join("\n");
+    }
 
     confirmBtn.addEventListener("click", async () => {
       const payload = {
