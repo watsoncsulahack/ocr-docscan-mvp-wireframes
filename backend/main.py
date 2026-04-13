@@ -50,9 +50,16 @@ except Exception:  # pragma: no cover
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = ROOT / "uploads"
+RUNTIME_DIR = DATA_DIR / "runtime"
+DB_PATH = DATA_DIR / "records.sqlite"
+LOCAL_BACKEND_URL_PATH = RUNTIME_DIR / "local_backend_url.txt"
+PUBLIC_BACKEND_URL_PATH = RUNTIME_DIR / "public_backend_url.txt"
+PUBLIC_BACKEND_META_PATH = RUNTIME_DIR / "public_backend_url.meta"
+TUNNEL_LOG_PATH = Path(os.getenv("OCR_MVP_TUNNEL_LOG", "/tmp/ocr-docscan-tunnel.log"))
+
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "records.sqlite"
+RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 
 APP_ORIGINS = [
     "https://watsoncsulahack.github.io",
@@ -163,6 +170,32 @@ def upsert_env_values(path: Path, values: dict) -> None:
     path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
 
 
+def read_text_if_exists(path: Path) -> str:
+    try:
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def tail_text_if_exists(path: Path, max_lines: int = 12) -> List[str]:
+    text = read_text_if_exists(path)
+    if not text:
+        return []
+    return text.splitlines()[-max_lines:]
+
+
+def parse_simple_meta(text: str) -> dict:
+    out = {}
+    for line in (text or "").splitlines():
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
 def normalize_container(value: str) -> str:
     text = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
     if len(text) >= 4:
@@ -255,6 +288,32 @@ def extract_container_candidates(raw_text: str) -> List[str]:
         t3 = _ocr_digits(tokens[i + 2])
         if re.fullmatch(r"[A-Z]{3,4}", t1) and re.fullmatch(r"[0-9]{6}", t2) and re.fullmatch(r"[0-9]", t3):
             candidates.append(t1 + t2 + t3)
+
+    # Missing check-digit recovery: SKYU 400093 -> compute SKYU4000932
+    for m in re.finditer(r"\b([A-Z0-9]{3,4})\s*([0-9A-Z]{6})\b", text):
+        p1 = _ocr_letters(m.group(1))
+        p2 = _ocr_digits(m.group(2))
+        prefix = normalize_container(f"{p1}{p2}")
+        if not re.fullmatch(r"[A-Z]{3}[UJZ][0-9]{6}", prefix):
+            continue
+        cd = iso6346_check_digit(prefix)
+        if cd is not None:
+            candidates.append(f"{prefix}{cd}")
+
+    # Loose token recovery when owner and serial are separated by other OCR noise tokens.
+    for i in range(len(tokens)):
+        owner = normalize_container(_ocr_letters(tokens[i]))
+        if not re.fullmatch(r"[A-Z]{3}[UJZ]", owner):
+            continue
+        for j in range(i + 1, min(i + 12, len(tokens))):
+            serial6 = _ocr_digits(tokens[j])
+            if not re.fullmatch(r"[0-9]{6}", serial6):
+                continue
+            prefix = f"{owner}{serial6}"
+            cd = iso6346_check_digit(prefix)
+            if cd is not None:
+                candidates.append(f"{prefix}{cd}")
+            break
 
     seen = set()
     uniq: List[str] = []
@@ -688,12 +747,21 @@ def llm_postprocess(
     if not env_bool("ENABLE_LLM_POSTPROCESS", "1"):
         return None, "llm_disabled"
 
-    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    provider = os.getenv("LLM_PROVIDER", "auto").strip().lower()
     if provider in ("none", "off", "disabled"):
         return None, "llm_disabled"
+
+    gemini_key_set = bool((os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip())
+    if provider in ("", "auto"):
+        provider = "gemini" if gemini_key_set else "openai"
+
     if provider in ("gemini", "google", "gemini_flash"):
         return llm_postprocess_gemini(raw_text, containers, dates, image_bytes, image_mime)
-    return llm_postprocess_openai(raw_text, containers, dates, image_bytes)
+
+    out, err = llm_postprocess_openai(raw_text, containers, dates, image_bytes)
+    if err == "llm_model_unavailable" and gemini_key_set:
+        return llm_postprocess_gemini(raw_text, containers, dates, image_bytes, image_mime)
+    return out, err
 
 
 class RecordIn(BaseModel):
@@ -729,7 +797,7 @@ def health():
         "service": "ocr-docscan-mvp-backend",
         "time": now_iso(),
         "ocrProvider": os.getenv("OCR_PROVIDER", "auto"),
-        "llmProvider": os.getenv("LLM_PROVIDER", "openai"),
+        "llmProvider": os.getenv("LLM_PROVIDER", "auto"),
         "ocrLibrariesAvailable": bool(Image is not None and pytesseract is not None),
         "pdfParserAvailable": bool(PdfReader is not None or pdfplumber is not None or fitz is not None),
         "doctrAvailable": bool(DocumentFile is not None and ocr_predictor is not None),
@@ -872,6 +940,30 @@ async def scan(file: UploadFile = File(...)):
     }
 
 
+@app.get("/control/local/runtime-info")
+def get_local_runtime_info():
+    if not env_bool("ENABLE_LOCAL_CONTROL_API", "0"):
+        raise HTTPException(status_code=403, detail="Local control API disabled")
+
+    local_backend_url = read_text_if_exists(LOCAL_BACKEND_URL_PATH)
+    public_backend_url = read_text_if_exists(PUBLIC_BACKEND_URL_PATH)
+    meta = parse_simple_meta(read_text_if_exists(PUBLIC_BACKEND_META_PATH))
+
+    if not public_backend_url and meta.get("backendUrl"):
+        public_backend_url = meta.get("backendUrl", "")
+
+    return {
+        "ok": True,
+        "runtime": {
+            "localBackendUrl": local_backend_url,
+            "publicBackendUrl": public_backend_url,
+            "generatedAt": meta.get("generatedAt", ""),
+            "frontendUrl": meta.get("frontendUrl", ""),
+            "tunnelLogTail": tail_text_if_exists(TUNNEL_LOG_PATH, max_lines=12),
+        },
+    }
+
+
 @app.post("/control/local/gemini-key")
 def set_local_gemini_key(payload: LocalGeminiConfigIn):
     if not env_bool("ENABLE_LOCAL_CONTROL_API", "0"):
@@ -896,6 +988,13 @@ def set_local_gemini_key(payload: LocalGeminiConfigIn):
         os.chmod(env_path, 0o600)
     except Exception:
         pass
+
+    os.environ["GEMINI_API_KEY"] = key
+    os.environ["LLM_PROVIDER"] = "gemini"
+    os.environ["OCR_PROVIDER"] = "ocrspace"
+    os.environ["ENABLE_LLM_POSTPROCESS"] = "1"
+    global LLM_MODEL_CACHE
+    LLM_MODEL_CACHE = None
 
     return {
         "ok": True,

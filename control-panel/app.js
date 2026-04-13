@@ -2,6 +2,7 @@
   const LS_KEY_BACKEND = "ocr.backend.url";
   const LS_KEY_FRONTEND_BASE = "ocr.frontend.baseUrl";
   const LS_KEY_RENDER_BACKEND = "ocr.render.backend.url";
+  const LS_KEY_LOCAL_BACKEND = "ocr.local.backend.url";
 
   const DEFAULT_FRONTEND_BASE = "https://watsoncsulahack.github.io/ocr-docscan-mvp-wireframes/";
   const LOCAL_BACKEND_DEFAULT = "http://127.0.0.1:8010";
@@ -21,18 +22,20 @@
     }
   }
 
-  function backendUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = normalizeUrl(params.get("backend"));
-    if (fromQuery) {
-      localStorage.setItem(LS_KEY_BACKEND, fromQuery);
-      return fromQuery;
-    }
-    return normalizeUrl(localStorage.getItem(LS_KEY_BACKEND) || window.OCR_BACKEND_URL || LOCAL_BACKEND_DEFAULT);
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function frontendBaseUrl() {
     return normalizeUrl(localStorage.getItem(LS_KEY_FRONTEND_BASE) || window.OCR_FRONTEND_BASE_URL || DEFAULT_FRONTEND_BASE);
+  }
+
+  function activeBackendUrl() {
+    return normalizeUrl(localStorage.getItem(LS_KEY_BACKEND) || window.OCR_BACKEND_URL || "");
+  }
+
+  function localBackendUrl() {
+    return normalizeUrl(localStorage.getItem(LS_KEY_LOCAL_BACKEND) || LOCAL_BACKEND_DEFAULT);
   }
 
   function githubPagesUrlFor(frontendBase, backend) {
@@ -43,6 +46,14 @@
     if (!frontend) return "";
     frontend.searchParams.set("backend", b);
     return frontend.toString();
+  }
+
+  function setRevisionBadge() {
+    const el = document.getElementById("controlPanelRevision");
+    if (!el) return;
+    const rev = String(window.OCR_CONTROL_REV || "local-dev").trim();
+    const source = String(window.OCR_CONTROL_SOURCE || "working-tree").trim();
+    el.textContent = `Control panel rev: ${rev} (${source})`;
   }
 
   function setStatus(text, ok) {
@@ -67,24 +78,27 @@
     el.textContent = parts.join(" | ");
   }
 
-  async function api(path, options = {}) {
-    const res = await fetch(`${backendUrl()}${path}`, options);
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
-    return json;
-  }
-
-  async function localApi(path, options = {}) {
-    const base = normalizeUrl(localStorage.getItem("ocr.local.backend.url") || LOCAL_BACKEND_DEFAULT);
+  async function apiWithBase(base, path, options = {}) {
     const res = await fetch(`${base}${path}`, options);
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
     return json;
   }
 
+  async function localApi(path, options = {}) {
+    return apiWithBase(localBackendUrl(), path, options);
+  }
+
   async function healthCheck() {
+    const backend = activeBackendUrl();
+    if (!backend) {
+      setStatus("Backend: not set", false);
+      setHealthMeta(null);
+      return false;
+    }
+
     try {
-      const data = await api("/health");
+      const data = await apiWithBase(backend, "/health");
       setStatus("Backend: online", true);
       setHealthMeta(data);
       return true;
@@ -102,7 +116,6 @@
     }
     out.push("http://127.0.0.1:8099/v0");
     out.push("http://localhost:8099/v0");
-
     return Array.from(new Set(out));
   }
 
@@ -126,12 +139,6 @@
     }
 
     throw lastErr || new Error("Supervisor unavailable");
-  }
-
-  async function readTextFile(path) {
-    const res = await fetch(path, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.text()).trim();
   }
 
   function shellEscapeSingle(value) {
@@ -172,13 +179,93 @@
     });
   }
 
+  function setGeneratedBackend(backendUrl) {
+    const backend = normalizeUrl(backendUrl);
+    const generatedOut = document.getElementById("generatedBackendUrlOutput");
+    const linkOut = document.getElementById("githubPagesRenderUrlOutput");
+    const renderInput = document.getElementById("renderBackendUrlInput");
+    const openBtn = document.getElementById("openMvpLinkBtn");
+
+    const mvpUrl = githubPagesUrlFor(frontendBaseUrl(), backend);
+
+    if (generatedOut) generatedOut.value = backend;
+    if (renderInput) renderInput.value = backend;
+    if (linkOut) linkOut.value = mvpUrl;
+    if (openBtn) openBtn.setAttribute("href", mvpUrl || "#");
+
+    if (backend) {
+      localStorage.setItem(LS_KEY_RENDER_BACKEND, backend);
+      localStorage.setItem(LS_KEY_BACKEND, backend);
+    }
+  }
+
+  async function fetchRuntimeInfo() {
+    try {
+      const out = await localApi("/control/local/runtime-info", { method: "GET" });
+      const runtime = out?.runtime || {};
+      const localUrl = normalizeUrl(runtime.localBackendUrl || "");
+      if (localUrl) localStorage.setItem(LS_KEY_LOCAL_BACKEND, localUrl);
+      return runtime;
+    } catch {
+      return {};
+    }
+  }
+
+  async function waitForPublicBackendUrl(maxWaitMs = 45000) {
+    const startedAt = Date.now();
+    let latest = {};
+
+    while (Date.now() - startedAt < maxWaitMs) {
+      latest = await fetchRuntimeInfo();
+      const url = normalizeUrl(latest.publicBackendUrl || "");
+      if (url) return { url, runtime: latest };
+      await sleep(1200);
+    }
+
+    return { url: "", runtime: latest };
+  }
+
+  function wireOneTapShare() {
+    const runBtn = document.getElementById("runShareScriptBtn");
+    const msg = document.getElementById("localOpsMsg");
+    if (!runBtn) return;
+
+    runBtn.addEventListener("click", async () => {
+      runBtn.disabled = true;
+      if (msg) msg.textContent = "Running share script...";
+
+      try {
+        await supervisorRequest("/activate", "POST", { id: "ocr-mvp-share" });
+        if (msg) msg.textContent = "Share script started. Waiting for public URL...";
+
+        const result = await waitForPublicBackendUrl(50000);
+        if (result.url) {
+          setGeneratedBackend(result.url);
+          if (msg) msg.textContent = `Success. Public backend URL is ready: ${result.url}`;
+          await healthCheck();
+        } else {
+          const tail = Array.isArray(result.runtime?.tunnelLogTail) ? result.runtime.tunnelLogTail : [];
+          if (msg) {
+            msg.textContent = tail.length
+              ? `Share script ran, but URL not detected yet. Tunnel log tail: ${tail[tail.length - 1]}`
+              : "Share script ran, but URL not detected yet. Tap again in a few seconds.";
+          }
+        }
+      } catch (err) {
+        if (msg) msg.textContent = `Failed to run share script: ${err.message}`;
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  }
+
   function wireRenderLinkHelper() {
     const renderInput = document.getElementById("renderBackendUrlInput");
     const generateBtn = document.getElementById("generateRenderLinkBtn");
     const output = document.getElementById("githubPagesRenderUrlOutput");
-    const backendOut = document.getElementById("renderBackendOnlyOutput");
+    const generatedOut = document.getElementById("generatedBackendUrlOutput");
     const msg = document.getElementById("renderLinkMsg");
-    if (!renderInput || !generateBtn || !output || !backendOut) return;
+    if (!renderInput || !generateBtn || !output || !generatedOut) return;
 
     renderInput.value = normalizeUrl(
       localStorage.getItem(LS_KEY_RENDER_BACKEND) || localStorage.getItem(LS_KEY_BACKEND) || window.OCR_BACKEND_URL || ""
@@ -191,102 +278,16 @@
         return;
       }
 
-      localStorage.setItem(LS_KEY_RENDER_BACKEND, backend);
-      localStorage.setItem(LS_KEY_BACKEND, backend);
-
-      output.value = githubPagesUrlFor(frontendBaseUrl(), backend);
-      backendOut.value = backend;
+      setGeneratedBackend(backend);
+      if (generatedOut) generatedOut.value = backend;
 
       try {
-        const res = await fetch(`${backend}/health`);
-        if (!res.ok) throw new Error();
-        const data = await res.json();
+        const data = await apiWithBase(backend, "/health");
         if (msg) msg.textContent = `Link generated. Backend online (OCR=${data.ocrProvider || "?"}, LLM=${data.llmProvider || "?"}).`;
       } catch {
         if (msg) msg.textContent = "Link generated, but backend health check failed on this backend URL.";
       }
     });
-  }
-
-  function wireLocalOpsPanel() {
-    const startBackendBtn = document.getElementById("startLocalBackendBtn");
-    const startTunnelBtn = document.getElementById("startTunnelBtn");
-    const stopTunnelBtn = document.getElementById("stopTunnelBtn");
-    const refreshBtn = document.getElementById("refreshGeneratedBackendBtn");
-    const useBtn = document.getElementById("useGeneratedBackendBtn");
-    const generatedOut = document.getElementById("generatedBackendUrlOutput");
-    const localOut = document.getElementById("localBackendUrlOutput");
-    const msg = document.getElementById("localOpsMsg");
-
-    if (!startBackendBtn || !startTunnelBtn || !stopTunnelBtn || !refreshBtn || !useBtn || !generatedOut || !localOut) return;
-
-    async function refreshUrls() {
-      try {
-        localOut.value = await readTextFile("../data/runtime/local_backend_url.txt");
-        localStorage.setItem("ocr.local.backend.url", localOut.value);
-      } catch {
-        localOut.value = LOCAL_BACKEND_DEFAULT;
-      }
-
-      try {
-        generatedOut.value = await readTextFile("../data/runtime/public_backend_url.txt");
-      } catch {
-        generatedOut.value = "";
-      }
-    }
-
-    startBackendBtn.addEventListener("click", async () => {
-      if (msg) msg.textContent = "Starting local backend...";
-      try {
-        await supervisorRequest("/activate", "POST", { id: "ocr-mvp-backend" });
-        await refreshUrls();
-        if (msg) msg.textContent = "Local backend started.";
-      } catch (err) {
-        if (msg) msg.textContent = `Failed to start backend: ${err.message}`;
-      }
-    });
-
-    startTunnelBtn.addEventListener("click", async () => {
-      if (msg) msg.textContent = "Starting tunnel and generating backend URL...";
-      try {
-        await supervisorRequest("/activate", "POST", { id: "ocr-mvp-share" });
-        setTimeout(refreshUrls, 1200);
-        setTimeout(refreshUrls, 3000);
-        if (msg) msg.textContent = "Tunnel start requested. Refresh in a moment if URL is still blank.";
-      } catch (err) {
-        if (msg) msg.textContent = `Failed to start tunnel: ${err.message}`;
-      }
-    });
-
-    stopTunnelBtn.addEventListener("click", async () => {
-      if (msg) msg.textContent = "Stopping tunnel...";
-      try {
-        await supervisorRequest("/stop", "POST", { id: "ocr-mvp-share" });
-        if (msg) msg.textContent = "Tunnel stopped.";
-      } catch (err) {
-        if (msg) msg.textContent = `Failed to stop tunnel: ${err.message}`;
-      }
-    });
-
-    refreshBtn.addEventListener("click", async () => {
-      await refreshUrls();
-      if (msg) msg.textContent = generatedOut.value ? "Generated backend URL refreshed." : "No generated backend URL yet.";
-    });
-
-    useBtn.addEventListener("click", () => {
-      const v = normalizeUrl(generatedOut.value);
-      if (!v) {
-        if (msg) msg.textContent = "No generated backend URL available yet.";
-        return;
-      }
-      localStorage.setItem(LS_KEY_BACKEND, v);
-      const renderInput = document.getElementById("renderBackendUrlInput");
-      if (renderInput) renderInput.value = v;
-      if (msg) msg.textContent = "Generated backend URL set as active backend.";
-      healthCheck();
-    });
-
-    refreshUrls();
   }
 
   function wireGeminiSetupPanel() {
@@ -303,10 +304,10 @@
       const base = `cd ${shellEscapeSingle(REPO_DIR)} && `;
 
       if (key) {
-        output.value = `${base}bash ./scripts/set_gemini_key.sh ${shellEscapeSingle(key)} && bash ./scripts/start_backend_local.sh`;
+        output.value = `${base}bash ./scripts/set_gemini_key.sh ${shellEscapeSingle(key)} && bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "Command includes the key. Clear shell history if needed.";
       } else {
-        output.value = `${base}bash ./scripts/set_gemini_key.sh && bash ./scripts/start_backend_local.sh`;
+        output.value = `${base}bash ./scripts/set_gemini_key.sh && bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "No key inserted. Script will prompt for key securely.";
       }
     });
@@ -327,133 +328,25 @@
         });
         if (note) note.textContent = out?.message || "Gemini key applied locally.";
       } catch (err) {
-        if (note) note.textContent = `Apply failed. Start local backend first. (${err.message})`;
+        if (note) note.textContent = `Apply failed. Run one-tap share script first. (${err.message})`;
       }
     });
-  }
-
-  function wireUploadPage() {
-    const fileInput = document.getElementById("fileInput");
-    const scanBtn = document.getElementById("scanBtn");
-    const msg = document.getElementById("scanMsg");
-    if (!fileInput || !scanBtn) return;
-
-    scanBtn.addEventListener("click", async () => {
-      const file = fileInput.files?.[0];
-      if (!file) {
-        if (msg) msg.textContent = "Pick an image first.";
-        return;
-      }
-      if (msg) msg.textContent = "Processing...";
-      const form = new FormData();
-      form.append("file", file);
-      try {
-        const data = await api("/scan", { method: "POST", body: form });
-        sessionStorage.setItem("ocr.scan", JSON.stringify(data));
-        window.location.href = "./review.html";
-      } catch (err) {
-        if (msg) msg.textContent = `Scan failed: ${err.message}`;
-      }
-    });
-  }
-
-  function wireReviewPage() {
-    const containerInput = document.getElementById("containerNo");
-    const dateInput = document.getElementById("eventDate");
-    const confirmBtn = document.getElementById("confirmBtn");
-    const msg = document.getElementById("reviewMsg");
-    const dbg = document.getElementById("scanDebug");
-    if (!containerInput || !dateInput || !confirmBtn) return;
-
-    const scan = JSON.parse(sessionStorage.getItem("ocr.scan") || "{}");
-    containerInput.value = scan?.extracted?.containerNo || "";
-    dateInput.value = scan?.extracted?.date || "";
-
-    if (dbg) {
-      const lines = [];
-      lines.push(`Pipeline: ${(scan?.pipeline || []).join(" -> ") || "n/a"}`);
-      lines.push(`Issues: ${(scan?.issues || []).join(", ") || "none"}`);
-      lines.push(`OCR mode: ${scan?.ocrMode || "n/a"}`);
-      if (scan?.rawTextPreview) {
-        lines.push("Raw text preview:");
-        lines.push(scan.rawTextPreview);
-      }
-      dbg.textContent = lines.join("\n");
-    }
-
-    confirmBtn.addEventListener("click", async () => {
-      const payload = {
-        containerNo: String(containerInput.value || "").trim(),
-        date: String(dateInput.value || "").trim(),
-        sourceFileName: scan?.sourceFileName || null,
-        corrected:
-          String(containerInput.value || "").trim() !== String(scan?.extracted?.containerNo || "").trim() ||
-          String(dateInput.value || "").trim() !== String(scan?.extracted?.date || "").trim(),
-      };
-      try {
-        const out = await api("/records", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        sessionStorage.setItem("ocr.saved", JSON.stringify(out.record || {}));
-        window.location.href = "./confirmation.html";
-      } catch (err) {
-        if (msg) msg.textContent = `Save failed: ${err.message}`;
-      }
-    });
-  }
-
-  function wireConfirmationPage() {
-    const rec = JSON.parse(sessionStorage.getItem("ocr.saved") || "{}");
-    const c = document.getElementById("cValue");
-    const d = document.getElementById("dValue");
-    if (c) c.textContent = rec.containerNo || "-";
-    if (d) d.textContent = rec.date || "-";
-  }
-
-  async function wireRecordsPage() {
-    const body = document.getElementById("recordsBody");
-    if (!body) return;
-    try {
-      const data = await api("/records");
-      const rows = data.records || [];
-      body.innerHTML = rows
-        .map((r) => `<tr><td>${r.containerNo || ""}</td><td>${r.date || ""}</td><td>${r.corrected ? "Yes" : "No"}</td></tr>`)
-        .join("");
-      if (!rows.length) body.innerHTML = `<tr><td colspan="3">No records yet.</td></tr>`;
-    } catch (err) {
-      body.innerHTML = `<tr><td colspan="3">Failed to load records: ${err.message}</td></tr>`;
-    }
-
-    const resetBtn = document.getElementById("resetDemoBtn");
-    if (resetBtn) {
-      resetBtn.addEventListener("click", async () => {
-        try {
-          await api("/reset-demo", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confirm: "RESET_DEMO" }),
-          });
-          await wireRecordsPage();
-        } catch (err) {
-          alert(`Reset failed: ${err.message}`);
-        }
-      });
-    }
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
+    setRevisionBadge();
+    wireOneTapShare();
     wireRenderLinkHelper();
-    wireLocalOpsPanel();
     wireGeminiSetupPanel();
     wireCopyButtons();
-    await healthCheck();
 
-    const page = document.body.dataset.page;
-    if (page === "upload") wireUploadPage();
-    if (page === "review") wireReviewPage();
-    if (page === "confirmation") wireConfirmationPage();
-    if (page === "records") wireRecordsPage();
+    const runtime = await fetchRuntimeInfo();
+    if (runtime?.publicBackendUrl) {
+      setGeneratedBackend(runtime.publicBackendUrl);
+    } else if (activeBackendUrl()) {
+      setGeneratedBackend(activeBackendUrl());
+    }
+
+    await healthCheck();
   });
 })();
