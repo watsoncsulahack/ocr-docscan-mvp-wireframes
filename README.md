@@ -8,7 +8,7 @@ This repo now includes:
 ## Current Demo Scope
 
 - Camera/image upload from phone browser
-- `/scan` endpoint (currently placeholder extraction from filename; OCR phase next)
+- `/scan` endpoint with simple OCR pipeline + ISO 6346-aware container candidate ranking
 - Review/correct fields
 - Save to SQLite (`containerNo`, `date`, `sourceFileName`, `corrected`, `createdAt`)
 - Records table reflects backend data
@@ -29,6 +29,8 @@ This repo now includes:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
+# OCR binary required for full image OCR:
+# Ubuntu/Debian: sudo apt-get install -y tesseract-ocr
 uvicorn backend.main:app --reload --port 8010
 ```
 
