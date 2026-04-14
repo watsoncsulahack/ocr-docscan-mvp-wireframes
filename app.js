@@ -55,21 +55,54 @@
     const msg = document.getElementById("scanMsg");
     if (!fileInput || !scanBtn) return;
 
+    let progressTimer = null;
+
+    function startProgressTicker() {
+      const startedAt = Date.now();
+      const tick = () => {
+        const sec = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+        let stage = "Uploading file to backend";
+        if (sec >= 3) stage = "Running OCR extraction";
+        if (sec >= 10) stage = "Running LLM cleanup (ISO 6346 check)";
+        if (sec >= 25) stage = "Finalizing extracted fields";
+        if (msg) msg.textContent = `Processing... ${stage} (${sec}s)`;
+      };
+      tick();
+      progressTimer = setInterval(tick, 1000);
+    }
+
+    function stopProgressTicker() {
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+      }
+    }
+
     scanBtn.addEventListener("click", async () => {
       const file = fileInput.files?.[0];
       if (!file) {
         if (msg) msg.textContent = "Pick an image first.";
         return;
       }
-      if (msg) msg.textContent = "Processing...";
+
+      scanBtn.disabled = true;
+      fileInput.disabled = true;
+      startProgressTicker();
+
       const form = new FormData();
       form.append("file", file);
       try {
         const data = await api("/scan", { method: "POST", body: form });
+        stopProgressTicker();
+        if (msg) msg.textContent = "Processing complete. Opening review...";
         sessionStorage.setItem("ocr.scan", JSON.stringify(data));
         window.location.href = "./review.html";
       } catch (err) {
+        stopProgressTicker();
         if (msg) msg.textContent = `Scan failed: ${err.message}`;
+      } finally {
+        scanBtn.disabled = false;
+        fileInput.disabled = false;
       }
     });
   }
