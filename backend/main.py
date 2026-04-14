@@ -347,6 +347,8 @@ def extract_container_candidates(raw_text: str) -> List[str]:
         n = normalize_container(c)
         if not CONTAINER_RE.fullmatch(n):
             continue
+        if not iso6346_is_valid(n):
+            continue
         if n in seen:
             continue
         seen.add(n)
@@ -1067,6 +1069,7 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
             "LLM_PROVIDER": "openai",
             "LLM_BASE_URL": "https://api.groq.com/openai",
             "LLM_MODEL": os.getenv("GROQ_MODEL", ""),
+            "LLM_INCLUDE_IMAGE": "0",
             "OCR_PROVIDER": "ocrspace",
             "ENABLE_LLM_POSTPROCESS": "1",
         },
@@ -1081,6 +1084,7 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
     os.environ["LLM_PROVIDER"] = "openai"
     os.environ["LLM_BASE_URL"] = "https://api.groq.com/openai"
     os.environ["LLM_MODEL"] = os.getenv("GROQ_MODEL", "")
+    os.environ["LLM_INCLUDE_IMAGE"] = "0"
     os.environ["OCR_PROVIDER"] = "ocrspace"
     os.environ["ENABLE_LLM_POSTPROCESS"] = "1"
     global LLM_MODEL_CACHE

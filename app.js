@@ -1,5 +1,6 @@
 (function () {
   const LS_KEY = "ocr.backend.url";
+  const SCAN_IMAGE_KEY = "ocr.scan.image";
 
   function backendUrl() {
     const params = new URLSearchParams(window.location.search);
@@ -64,6 +65,15 @@
     });
   }
 
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("file_read_failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
   function wireUploadPage() {
     const fileInput = document.getElementById("fileInput");
     const scanBtn = document.getElementById("scanBtn");
@@ -106,6 +116,15 @@
 
       const form = new FormData();
       form.append("file", file);
+
+      try {
+        // Keep a local preview for review screen comparison.
+        const dataUrl = await fileToDataUrl(file);
+        if (dataUrl) sessionStorage.setItem(SCAN_IMAGE_KEY, dataUrl);
+      } catch {
+        sessionStorage.removeItem(SCAN_IMAGE_KEY);
+      }
+
       try {
         const data = await api("/scan", { method: "POST", body: form });
         stopProgressTicker();
@@ -128,9 +147,17 @@
     const confirmBtn = document.getElementById("confirmBtn");
     const msg = document.getElementById("reviewMsg");
     const dbg = document.getElementById("scanDebug");
+    const uploadedImg = document.getElementById("uploadedPreviewImg");
+    const uploadedHint = document.getElementById("uploadedPreviewHint");
     if (!containerInput || !dateInput || !confirmBtn) return;
 
     const scan = JSON.parse(sessionStorage.getItem("ocr.scan") || "{}");
+    const imgDataUrl = sessionStorage.getItem(SCAN_IMAGE_KEY) || "";
+    if (uploadedImg && imgDataUrl) {
+      uploadedImg.src = imgDataUrl;
+      uploadedImg.style.display = "block";
+      if (uploadedHint) uploadedHint.style.display = "none";
+    }
     containerInput.value = scan?.extracted?.containerNo || "";
     dateInput.value = scan?.extracted?.date || "";
 
