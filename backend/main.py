@@ -657,7 +657,7 @@ def build_llm_prompt(raw_text: str, containers: List[str], dates: List[str]) -> 
         "Extract containerNo and date (MM/DD/YYYY) from OCR text. "
         "Container should follow ISO 6346 (AAAA1234567). "
         "Return strict JSON only with keys: containerNo, date."
-        f"\n\nOCR TEXT:\n{raw_text[:3000]}"
+        f"\n\nOCR TEXT:\n{raw_text[:1200]}"
         f"\n\nCANDIDATE CONTAINERS: {containers}"
         f"\nCANDIDATE DATES: {dates}"
     )
