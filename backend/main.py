@@ -831,7 +831,7 @@ class RecordIn(BaseModel):
     corrected: bool = False
 
 
-class LocalOpenRouterConfigIn(BaseModel):
+class LocalGroqConfigIn(BaseModel):
     apiKey: str = Field(min_length=8, max_length=256)
 
 
@@ -1038,14 +1038,14 @@ def get_local_runtime_info():
     }
 
 
-@app.post("/control/local/openrouter-key")
-def set_local_openrouter_key(payload: LocalOpenRouterConfigIn):
+@app.post("/control/local/groq-key")
+def set_local_groq_key(payload: LocalGroqConfigIn):
     if not env_bool("ENABLE_LOCAL_CONTROL_API", "0"):
         raise HTTPException(status_code=403, detail="Local control API disabled")
 
     key = (payload.apiKey or "").strip()
     if not key:
-        raise HTTPException(status_code=400, detail="OpenRouter key is required")
+        raise HTTPException(status_code=400, detail="Groq key is required")
 
     env_path = ROOT / ".env"
     upsert_env_values(
@@ -1053,14 +1053,10 @@ def set_local_openrouter_key(payload: LocalOpenRouterConfigIn):
         {
             "LLM_API_KEY": key,
             "LLM_PROVIDER": "openai",
-            "LLM_BASE_URL": "https://openrouter.ai/api/v1",
-            "LLM_MODEL": os.getenv("OPENROUTER_MODEL", "openrouter/free"),
+            "LLM_BASE_URL": "https://api.groq.com/openai/v1",
+            "LLM_MODEL": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
             "OCR_PROVIDER": "ocrspace",
             "ENABLE_LLM_POSTPROCESS": "1",
-            "OPENROUTER_APP_URL": os.getenv(
-                "OPENROUTER_APP_URL", "https://watsoncsulahack.github.io/ocr-docscan-mvp-wireframes/"
-            ),
-            "OPENROUTER_APP_TITLE": os.getenv("OPENROUTER_APP_TITLE", "OCR_DocScan_MVP"),
         },
     )
 
@@ -1071,22 +1067,18 @@ def set_local_openrouter_key(payload: LocalOpenRouterConfigIn):
 
     os.environ["LLM_API_KEY"] = key
     os.environ["LLM_PROVIDER"] = "openai"
-    os.environ["LLM_BASE_URL"] = "https://openrouter.ai/api/v1"
-    os.environ["LLM_MODEL"] = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+    os.environ["LLM_BASE_URL"] = "https://api.groq.com/openai/v1"
+    os.environ["LLM_MODEL"] = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     os.environ["OCR_PROVIDER"] = "ocrspace"
     os.environ["ENABLE_LLM_POSTPROCESS"] = "1"
-    os.environ["OPENROUTER_APP_URL"] = os.getenv(
-        "OPENROUTER_APP_URL", "https://watsoncsulahack.github.io/ocr-docscan-mvp-wireframes/"
-    )
-    os.environ["OPENROUTER_APP_TITLE"] = os.getenv("OPENROUTER_APP_TITLE", "OCR_DocScan_MVP")
     global LLM_MODEL_CACHE
     LLM_MODEL_CACHE = None
 
     return {
         "ok": True,
-        "message": "OpenRouter key saved to .env",
+        "message": "Groq key saved to .env",
         "path": str(env_path),
-        "providers": {"ocr": "ocrspace", "llm": "openrouter"},
+        "providers": {"ocr": "ocrspace", "llm": "groq"},
     }
 
 

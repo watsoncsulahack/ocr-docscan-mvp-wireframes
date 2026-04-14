@@ -290,12 +290,12 @@
     });
   }
 
-  function wireOpenRouterSetupPanel() {
-    const keyInput = document.getElementById("openrouterKeyInput");
-    const buildBtn = document.getElementById("buildOpenRouterCommandBtn");
-    const applyBtn = document.getElementById("applyOpenRouterKeyBtn");
-    const output = document.getElementById("openrouterSetupCommandOutput");
-    const note = document.getElementById("openrouterSetupNote");
+  function wireGroqSetupPanel() {
+    const keyInput = document.getElementById("groqKeyInput");
+    const buildBtn = document.getElementById("buildGroqCommandBtn");
+    const applyBtn = document.getElementById("applyGroqKeyBtn");
+    const output = document.getElementById("groqSetupCommandOutput");
+    const note = document.getElementById("groqSetupNote");
 
     if (!buildBtn || !output) return;
 
@@ -304,10 +304,10 @@
       const base = `cd ${shellEscapeSingle(REPO_DIR)} && `;
 
       if (key) {
-        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://openrouter.ai/api/v1 LLM_MODEL=openrouter/free LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai/v1 LLM_MODEL=llama-3.1-8b-instant LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "Command includes the key. Clear shell history if needed.";
       } else {
-        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://openrouter.ai/api/v1 LLM_MODEL=openrouter/free OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai/v1 LLM_MODEL=llama-3.1-8b-instant OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "No key inserted. Add key or use one-tap apply.";
       }
     });
@@ -315,18 +315,18 @@
     applyBtn?.addEventListener("click", async () => {
       const key = String(keyInput?.value || "").trim();
       if (!key) {
-        if (note) note.textContent = "Enter OpenRouter key first.";
+        if (note) note.textContent = "Enter Groq key first.";
         return;
       }
       if (note) note.textContent = "Applying key to local backend...";
 
       try {
-        const out = await localApi("/control/local/openrouter-key", {
+        const out = await localApi("/control/local/groq-key", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ apiKey: key }),
         });
-        if (note) note.textContent = out?.message || "OpenRouter key applied locally.";
+        if (note) note.textContent = out?.message || "Groq key applied locally.";
       } catch (err) {
         if (note) note.textContent = `Apply failed. Run one-tap share script first. (${err.message})`;
       }
@@ -337,7 +337,7 @@
     setRevisionBadge();
     wireOneTapShare();
     wireRenderLinkHelper();
-    wireOpenRouterSetupPanel();
+    wireGroqSetupPanel();
     wireCopyButtons();
 
     const runtime = await fetchRuntimeInfo();
