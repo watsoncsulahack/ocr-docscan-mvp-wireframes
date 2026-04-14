@@ -126,7 +126,7 @@
       }
 
       try {
-        const data = await api("/scan", { method: "POST", body: form });
+        const data = await api("/scan", { method: "POST", body: form, timeoutMs: 120000 });
         stopProgressTicker();
         if (msg) msg.textContent = "Processing complete. Opening review...";
         sessionStorage.setItem("ocr.scan", JSON.stringify(data));
