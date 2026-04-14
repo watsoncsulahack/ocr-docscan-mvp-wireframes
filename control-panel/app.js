@@ -360,11 +360,44 @@
     });
   }
 
+  async function wireModeToggle() {
+    const toggle = document.getElementById("directImageToLlmToggle");
+    const applyBtn = document.getElementById("applyModeBtn");
+    const msg = document.getElementById("modeToggleMsg");
+    if (!toggle || !applyBtn) return;
+
+    try {
+      const health = await localApi("/health", { method: "GET", timeoutMs: 6000 });
+      toggle.checked = Boolean(health?.directImageToLlm);
+    } catch {
+      // keep default state
+    }
+
+    applyBtn.addEventListener("click", async () => {
+      applyBtn.disabled = true;
+      if (msg) msg.textContent = "Applying mode...";
+      try {
+        const out = await localApi("/control/local/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ directImageToLlm: Boolean(toggle.checked) }),
+        });
+        if (msg) msg.textContent = out?.message || "Mode updated.";
+        await healthCheck();
+      } catch (err) {
+        if (msg) msg.textContent = `Mode update failed: ${err.message}`;
+      } finally {
+        applyBtn.disabled = false;
+      }
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
     setRevisionBadge();
     wireOneTapShare();
     wireRenderLinkHelper();
     wireGroqSetupPanel();
+    await wireModeToggle();
     wireCopyButtons();
 
     const runtime = await fetchRuntimeInfo();

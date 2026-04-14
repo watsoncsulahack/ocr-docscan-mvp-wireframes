@@ -15,6 +15,17 @@
       </div>
       <p id="controlPanelRevision" class="note"></p>
       <p id="backendHealthMeta" class="note"></p>
+
+      <div class="field">
+        <label class="label" for="directImageToLlmToggle">Processing mode</label>
+        <div class="row" style="align-items:center;">
+          <input id="directImageToLlmToggle" type="checkbox" />
+          <span class="note">Direct image → LLM (skip OCR stage, test mode)</span>
+          <button id="applyModeBtn" class="btn" type="button">Apply Mode</button>
+        </div>
+        <p id="modeToggleMsg" class="note"></p>
+      </div>
+
       <div class="hr"></div>
 
       <h2 class="h2" style="margin-bottom: 10px;">One-Tap Share Script</h2>
@@ -83,7 +94,7 @@
       <p class="footer-note">Control panel is local to your device. GitHub Pages MVP stays unchanged.</p>
     </section>
   </main>
-  <script src="./config.js?v=20260414m"></script>
-  <script src="./app.js?v=20260414m"></script>
+  <script src="./config.js?v=20260414n"></script>
+  <script src="./app.js?v=20260414n"></script>
 </body>
 </html>

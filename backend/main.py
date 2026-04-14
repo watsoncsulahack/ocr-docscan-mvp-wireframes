@@ -926,6 +926,10 @@ class LocalGroqConfigIn(BaseModel):
     apiKey: str = Field(min_length=8, max_length=256)
 
 
+class LocalModeConfigIn(BaseModel):
+    directImageToLlm: bool = False
+
+
 app = FastAPI(title="OCR DocScan MVP Backend", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
@@ -1228,6 +1232,37 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
         "message": "Groq key saved to .env",
         "path": str(env_path),
         "providers": {"ocr": "ocrspace", "llm": "groq"},
+    }
+
+
+@app.post("/control/local/mode")
+def set_local_mode(payload: LocalModeConfigIn):
+    if not env_bool("ENABLE_LOCAL_CONTROL_API", "0"):
+        raise HTTPException(status_code=403, detail="Local control API disabled")
+
+    direct = bool(payload.directImageToLlm)
+    env_path = ROOT / ".env"
+    upsert_env_values(
+        env_path,
+        {
+            "DIRECT_IMAGE_TO_LLM": "1" if direct else "0",
+            "LLM_INCLUDE_IMAGE": "1" if direct else os.getenv("LLM_INCLUDE_IMAGE", "0"),
+        },
+    )
+
+    try:
+        os.chmod(env_path, 0o600)
+    except Exception:
+        pass
+
+    os.environ["DIRECT_IMAGE_TO_LLM"] = "1" if direct else "0"
+    if direct:
+        os.environ["LLM_INCLUDE_IMAGE"] = "1"
+
+    return {
+        "ok": True,
+        "message": "Mode updated",
+        "mode": {"directImageToLlm": direct},
     }
 
 
