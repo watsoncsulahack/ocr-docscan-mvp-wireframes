@@ -1088,7 +1088,7 @@ async def scan(file: UploadFile = File(...)):
 
     issues = []
     if not valid_containers and not extracted_container:
-        issues.append("no_iso_container_text_found")
+        issues.append("iso_container_text_not_found")
     elif len(valid_containers) > 1:
         issues.append("multiple_container_matches")
 

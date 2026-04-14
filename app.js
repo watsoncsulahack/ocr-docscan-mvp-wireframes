@@ -175,7 +175,11 @@
     if (!prefillContainer && validCandidates.length) {
       prefillContainer = validCandidates[0];
     }
-    if (scanIssues.includes("no_container_found") || scanIssues.includes("no_iso_container_text_found")) {
+    if (
+      scanIssues.includes("no_container_found") ||
+      scanIssues.includes("no_iso_container_text_found") ||
+      scanIssues.includes("iso_container_text_not_found")
+    ) {
       prefillContainer = "";
     }
 
