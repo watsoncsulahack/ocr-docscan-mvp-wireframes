@@ -1,6 +1,7 @@
 (function () {
   const LS_KEY = "ocr.backend.url";
   const SCAN_IMAGE_KEY = "ocr.scan.image";
+  const LOCAL_RECORDS_KEY = "ocr.local.records";
 
   function backendUrl() {
     const params = new URLSearchParams(window.location.search);
@@ -141,6 +142,35 @@
     });
   }
 
+  function getLocalRecords() {
+    try {
+      const raw = localStorage.getItem(LOCAL_RECORDS_KEY) || "[]";
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function setLocalRecords(records) {
+    localStorage.setItem(LOCAL_RECORDS_KEY, JSON.stringify(Array.isArray(records) ? records : []));
+  }
+
+  function saveLocalRecord(payload) {
+    const records = getLocalRecords();
+    const rec = {
+      id: Date.now(),
+      containerNo: String(payload.containerNo || "").trim(),
+      date: String(payload.date || "").trim(),
+      corrected: Boolean(payload.corrected),
+      sourceFileName: payload.sourceFileName || null,
+      createdAt: new Date().toISOString(),
+    };
+    records.unshift(rec);
+    setLocalRecords(records);
+    return rec;
+  }
+
   function wireReviewPage() {
     const containerInput = document.getElementById("containerNo");
     const dateInput = document.getElementById("eventDate");
@@ -207,13 +237,10 @@
           String(containerInput.value || "").trim() !== String(scan?.extracted?.containerNo || "").trim() ||
           String(dateInput.value || "").trim() !== String(scan?.extracted?.date || "").trim(),
       };
+
       try {
-        const out = await api("/records", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        sessionStorage.setItem("ocr.saved", JSON.stringify(out.record || {}));
+        const rec = saveLocalRecord(payload);
+        sessionStorage.setItem("ocr.saved", JSON.stringify(rec));
         window.location.href = "./confirmation.html";
       } catch (err) {
         if (msg) msg.textContent = `Save failed: ${err.message}`;
@@ -232,28 +259,20 @@
   async function wireRecordsPage() {
     const body = document.getElementById("recordsBody");
     if (!body) return;
-    try {
-      const data = await api("/records");
-      const rows = data.records || [];
-      body.innerHTML = rows
-        .map(
-          (r) => `<tr><td>${r.containerNo || ""}</td><td>${r.date || ""}</td><td>${r.corrected ? "Yes" : "No"}</td></tr>`
-        )
-        .join("");
-      if (!rows.length) body.innerHTML = `<tr><td colspan="3">No records yet.</td></tr>`;
-    } catch (err) {
-      body.innerHTML = `<tr><td colspan="3">Failed to load records: ${err.message}</td></tr>`;
-    }
+
+    const rows = getLocalRecords();
+    body.innerHTML = rows
+      .map(
+        (r) => `<tr><td>${r.containerNo || ""}</td><td>${r.date || ""}</td><td>${r.corrected ? "Yes" : "No"}</td></tr>`
+      )
+      .join("");
+    if (!rows.length) body.innerHTML = `<tr><td colspan="3">No records yet (local storage).</td></tr>`;
 
     const resetBtn = document.getElementById("resetDemoBtn");
     if (resetBtn) {
       resetBtn.addEventListener("click", async () => {
         try {
-          await api("/reset-demo", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confirm: "RESET_DEMO" }),
-          });
+          setLocalRecords([]);
           await wireRecordsPage();
         } catch (err) {
           alert(`Reset failed: ${err.message}`);
