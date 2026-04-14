@@ -955,6 +955,7 @@ def health():
         "ocrSpaceApiKeySet": bool(os.getenv("OCR_SPACE_API_KEY")),
         "llmApiKeySet": bool(os.getenv("LLM_API_KEY")),
         "geminiApiKeySet": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+        "directImageToLlm": env_bool("DIRECT_IMAGE_TO_LLM", "0"),
         "localControlApi": env_bool("ENABLE_LOCAL_CONTROL_API", "0"),
     }
 
@@ -996,6 +997,42 @@ async def scan(file: UploadFile = File(...)):
             except Exception:
                 image_for_ocr = None
         pipeline_notes.append("input_image")
+
+    if is_image and env_bool("DIRECT_IMAGE_TO_LLM", "0"):
+        pipeline_notes.append("llm_direct_image_mode")
+
+        llm_structured, llm_error = llm_postprocess(
+            raw_text="",
+            containers=[],
+            dates=[],
+            image_bytes=raw,
+            image_mime=ctype or "image/jpeg",
+        )
+        if llm_structured:
+            pipeline_notes.append("llm_postprocess")
+        elif llm_error:
+            pipeline_notes.append(llm_error)
+
+        extracted_container = (llm_structured or {}).get("containerNo") or ""
+        extracted_date = (llm_structured or {}).get("date") or dt.datetime.now().strftime("%m/%d/%Y")
+
+        issues = []
+        if not extracted_container:
+            issues.append("iso_container_text_not_found")
+
+        return {
+            "ok": True,
+            "scanId": str(uuid.uuid4()),
+            "extracted": {"containerNo": extracted_container, "date": extracted_date},
+            "candidates": {"containerNos": [], "dates": []},
+            "candidateDetails": {"containerNos": []},
+            "issues": issues,
+            "requiresReview": True,
+            "sourceFileName": filename,
+            "ocrMode": "llm_direct_image",
+            "rawTextPreview": "",
+            "pipeline": pipeline_notes,
+        }
 
     tess_ok = False
     doctr_ok = False

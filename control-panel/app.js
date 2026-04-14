@@ -74,6 +74,7 @@
     if (data.ocrProvider) parts.push(`OCR: ${data.ocrProvider}`);
     if (data.llmProvider) parts.push(`LLM: ${data.llmProvider}`);
     if (typeof data.llmApiKeySet === "boolean") parts.push(`LLM key: ${data.llmApiKeySet ? "set" : "missing"}`);
+    if (typeof data.directImageToLlm === "boolean") parts.push(`Direct image→LLM: ${data.directImageToLlm ? "on" : "off"}`);
     if (typeof data.localControlApi === "boolean") parts.push(`Local control API: ${data.localControlApi ? "on" : "off"}`);
     el.textContent = parts.join(" | ");
   }
