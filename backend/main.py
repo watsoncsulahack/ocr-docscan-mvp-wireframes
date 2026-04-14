@@ -73,6 +73,7 @@ APP_ORIGINS = [
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
 CONTAINER_RE = re.compile(r"\b([A-Z]{4}[0-9]{7})\b")
+CONTAINER_STRICT_RE = re.compile(r"^[A-Z]{3}[UJZ][0-9]{7}$")
 DATE_RE = re.compile(r"\b((?:0[1-9]|1[0-2])/(?:0[1-9]|[12][0-9]|3[01])/[0-9]{4})\b")
 
 ISO6346_LETTER_VALUES = {
@@ -217,7 +218,8 @@ def normalize_container(value: str) -> str:
 
 
 def valid_container(value: str) -> bool:
-    return iso6346_is_valid(value)
+    value = normalize_container(value)
+    return bool(CONTAINER_STRICT_RE.fullmatch(value)) and iso6346_is_valid(value)
 
 
 def valid_date(value: str) -> bool:
@@ -313,6 +315,13 @@ def extract_container_candidates(raw_text: str) -> List[str]:
         if not re.fullmatch(r"[A-Z]{3}[UJZ]", owner):
             continue
         for j in range(i + 1, min(i + 12, len(tokens))):
+            serial7 = _ocr_digits(tokens[j])
+            if re.fullmatch(r"[0-9]{7}", serial7):
+                candidate = f"{owner}{serial7}"
+                if valid_container(candidate):
+                    candidates.append(candidate)
+                    break
+
             serial6 = _ocr_digits(tokens[j])
             if not re.fullmatch(r"[0-9]{6}", serial6):
                 continue
@@ -347,7 +356,7 @@ def extract_container_candidates(raw_text: str) -> List[str]:
         n = normalize_container(c)
         if not CONTAINER_RE.fullmatch(n):
             continue
-        if not iso6346_is_valid(n):
+        if not valid_container(n):
             continue
         if n in seen:
             continue
@@ -366,7 +375,7 @@ def extract_container_candidates(raw_text: str) -> List[str]:
         owner_seen = owner in owner_tokens
         serial_seen = any(_ocr_digits(t) == serial for t in tokens)
         return (
-            0 if iso6346_is_valid(c) else 1,
+            0 if valid_container(c) else 1,
             0 if owner_seen else 1,
             0 if serial_seen else 1,
             c,
@@ -682,8 +691,26 @@ def resolve_llm_model(base_url: str) -> Optional[str]:
         with url_request.urlopen(req, timeout=10) as res:
             data = json.loads(res.read().decode("utf-8", "ignore"))
         models = data.get("data") or []
-        if models:
-            LLM_MODEL_CACHE = models[0].get("id")
+        model_ids = [str(m.get("id") or "").strip() for m in models if str(m.get("id") or "").strip()]
+
+        preferred = [
+            s.strip()
+            for s in (os.getenv("LLM_MODEL_PREFER", "llama-3.1-8b-instant,llama-3.3-70b-versatile")).split(",")
+            if s.strip()
+        ]
+        for want in preferred:
+            for mid in model_ids:
+                if mid == want or want in mid:
+                    LLM_MODEL_CACHE = mid
+                    return LLM_MODEL_CACHE
+
+        # Fallback: choose first chat-capable text model, skip whisper/audio/moderation style ids.
+        for mid in model_ids:
+            low = mid.lower()
+            if any(bad in low for bad in ("whisper", "tts", "transcribe", "moderation", "guard")):
+                continue
+            LLM_MODEL_CACHE = mid
+            return LLM_MODEL_CACHE
     except Exception:
         return None
     return LLM_MODEL_CACHE
