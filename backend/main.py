@@ -643,12 +643,28 @@ def extract_json_object(text: str) -> Optional[dict]:
         return None
 
 
+def llm_headers(content_type: str = "application/json") -> dict:
+    headers = {"Content-Type": content_type}
+    api_key = os.getenv("LLM_API_KEY", "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    # Helpful metadata for OpenRouter (optional).
+    app_url = os.getenv("OPENROUTER_APP_URL", "").strip()
+    app_title = os.getenv("OPENROUTER_APP_TITLE", "").strip()
+    if app_url:
+        headers["HTTP-Referer"] = app_url
+    if app_title:
+        headers["X-Title"] = app_title
+    return headers
+
+
 def resolve_llm_model(base_url: str) -> Optional[str]:
     global LLM_MODEL_CACHE
     if LLM_MODEL_CACHE:
         return LLM_MODEL_CACHE
     try:
-        req = url_request.Request(f"{base_url}/v1/models", headers={"Content-Type": "application/json"})
+        req = url_request.Request(f"{base_url}/v1/models", headers=llm_headers())
         with url_request.urlopen(req, timeout=10) as res:
             data = json.loads(res.read().decode("utf-8", "ignore"))
         models = data.get("data") or []
@@ -707,7 +723,7 @@ def llm_postprocess_openai(
     req = url_request.Request(
         f"{base_url}/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=llm_headers(),
         method="POST",
     )
     try:
