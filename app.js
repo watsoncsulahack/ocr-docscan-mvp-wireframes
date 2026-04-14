@@ -151,14 +151,35 @@
     const uploadedHint = document.getElementById("uploadedPreviewHint");
     if (!containerInput || !dateInput || !confirmBtn) return;
 
-    const scan = JSON.parse(sessionStorage.getItem("ocr.scan") || "{}");
+    let scan = {};
+    try {
+      scan = JSON.parse(sessionStorage.getItem("ocr.scan") || "{}");
+    } catch {
+      scan = {};
+    }
+
     const imgDataUrl = sessionStorage.getItem(SCAN_IMAGE_KEY) || "";
     if (uploadedImg && imgDataUrl) {
       uploadedImg.src = imgDataUrl;
       uploadedImg.style.display = "block";
       if (uploadedHint) uploadedHint.style.display = "none";
     }
-    containerInput.value = scan?.extracted?.containerNo || "";
+
+    const scanIssues = Array.isArray(scan?.issues) ? scan.issues : [];
+    const candidateDetails = Array.isArray(scan?.candidateDetails?.containerNos)
+      ? scan.candidateDetails.containerNos
+      : [];
+    const validCandidates = candidateDetails.filter((c) => c && c.iso6346Valid && c.value).map((c) => String(c.value));
+
+    let prefillContainer = String(scan?.extracted?.containerNo || "").trim();
+    if (!prefillContainer && validCandidates.length) {
+      prefillContainer = validCandidates[0];
+    }
+    if (scanIssues.includes("no_container_found")) {
+      prefillContainer = "";
+    }
+
+    containerInput.value = prefillContainer;
     dateInput.value = scan?.extracted?.date || "";
 
     if (dbg) {
