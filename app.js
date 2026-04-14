@@ -12,10 +12,25 @@
   }
 
   async function api(path, options = {}) {
-    const res = await fetch(`${backendUrl()}${path}`, options);
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
-    return json;
+    const timeoutMs = Number(options.timeoutMs || 15000);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const reqOptions = { ...options, signal: controller.signal };
+      delete reqOptions.timeoutMs;
+      const res = await fetch(`${backendUrl()}${path}`, reqOptions);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
+      return json;
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        throw new Error(`Request timeout after ${Math.round(timeoutMs / 1000)}s`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function setStatus(text, ok) {
@@ -27,7 +42,7 @@
 
   async function healthCheck() {
     try {
-      await api("/health");
+      await api("/health", { timeoutMs: 6000 });
       setStatus("Backend: online", true);
       return true;
     } catch {

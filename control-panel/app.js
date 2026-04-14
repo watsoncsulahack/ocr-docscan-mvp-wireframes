@@ -79,10 +79,22 @@
   }
 
   async function apiWithBase(base, path, options = {}) {
-    const res = await fetch(`${base}${path}`, options);
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
-    return json;
+    const timeoutMs = Number(options.timeoutMs || 10000);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const reqOptions = { ...options, signal: controller.signal };
+      delete reqOptions.timeoutMs;
+      const res = await fetch(`${base}${path}`, reqOptions);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
+      return json;
+    } catch (err) {
+      if (err?.name === "AbortError") throw new Error(`Request timeout after ${Math.round(timeoutMs / 1000)}s`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function localApi(path, options = {}) {
@@ -304,10 +316,10 @@
       const base = `cd ${shellEscapeSingle(REPO_DIR)} && `;
 
       if (key) {
-        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai/v1 LLM_MODEL=llama-3.1-8b-instant LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai LLM_MODEL=llama-3.1-8b-instant LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "Command includes the key. Clear shell history if needed.";
       } else {
-        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai/v1 LLM_MODEL=llama-3.1-8b-instant OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai LLM_MODEL=llama-3.1-8b-instant OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "No key inserted. Add key or use one-tap apply.";
       }
     });

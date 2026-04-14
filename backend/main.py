@@ -644,7 +644,11 @@ def extract_json_object(text: str) -> Optional[dict]:
 
 
 def llm_headers(content_type: str = "application/json") -> dict:
-    headers = {"Content-Type": content_type}
+    headers = {
+        "Content-Type": content_type,
+        "Accept": "application/json",
+        "User-Agent": os.getenv("LLM_USER_AGENT", "OCR-DocScan-MVP/1.0"),
+    }
     api_key = os.getenv("LLM_API_KEY", "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -659,12 +663,20 @@ def llm_headers(content_type: str = "application/json") -> dict:
     return headers
 
 
+def llm_api_url(base_url: str, path: str) -> str:
+    base = (base_url or "").rstrip("/")
+    p = "/" + str(path or "").lstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}{p}"
+    return f"{base}/v1{p}"
+
+
 def resolve_llm_model(base_url: str) -> Optional[str]:
     global LLM_MODEL_CACHE
     if LLM_MODEL_CACHE:
         return LLM_MODEL_CACHE
     try:
-        req = url_request.Request(f"{base_url}/v1/models", headers=llm_headers())
+        req = url_request.Request(llm_api_url(base_url, "/models"), headers=llm_headers())
         with url_request.urlopen(req, timeout=10) as res:
             data = json.loads(res.read().decode("utf-8", "ignore"))
         models = data.get("data") or []
@@ -721,7 +733,7 @@ def llm_postprocess_openai(
     }
 
     req = url_request.Request(
-        f"{base_url}/v1/chat/completions",
+        llm_api_url(base_url, "/chat/completions"),
         data=json.dumps(payload).encode("utf-8"),
         headers=llm_headers(),
         method="POST",
@@ -1053,8 +1065,8 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
         {
             "LLM_API_KEY": key,
             "LLM_PROVIDER": "openai",
-            "LLM_BASE_URL": "https://api.groq.com/openai/v1",
-            "LLM_MODEL": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "LLM_BASE_URL": "https://api.groq.com/openai",
+            "LLM_MODEL": os.getenv("GROQ_MODEL", ""),
             "OCR_PROVIDER": "ocrspace",
             "ENABLE_LLM_POSTPROCESS": "1",
         },
@@ -1067,8 +1079,8 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
 
     os.environ["LLM_API_KEY"] = key
     os.environ["LLM_PROVIDER"] = "openai"
-    os.environ["LLM_BASE_URL"] = "https://api.groq.com/openai/v1"
-    os.environ["LLM_MODEL"] = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+    os.environ["LLM_BASE_URL"] = "https://api.groq.com/openai"
+    os.environ["LLM_MODEL"] = os.getenv("GROQ_MODEL", "")
     os.environ["OCR_PROVIDER"] = "ocrspace"
     os.environ["ENABLE_LLM_POSTPROCESS"] = "1"
     global LLM_MODEL_CACHE
