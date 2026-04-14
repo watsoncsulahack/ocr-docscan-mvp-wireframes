@@ -559,6 +559,42 @@ def pil_to_jpeg_bytes(image) -> Optional[bytes]:
         return None
 
 
+def ocrspace_image_inputs(image, filename: str) -> List[Tuple[bytes, str, str, str]]:
+    """Build a bounded set of OCR.Space image variants for hard container photos."""
+    out: List[Tuple[bytes, str, str, str]] = []
+    if image is None:
+        return out
+
+    base_name = Path(filename or "capture").stem
+
+    def add_variant(tag: str, img_obj) -> None:
+        b = pil_to_jpeg_bytes(img_obj)
+        if b:
+            out.append((b, f"{base_name}_{tag}.jpg", "image/jpeg", tag))
+
+    add_variant("orig", image)
+
+    # full-image preprocess
+    gray = image.convert("L")
+    gray = ImageOps.autocontrast(gray)
+    gray = ImageEnhance.Contrast(gray).enhance(2.0)
+    add_variant("prep", gray.convert("RGB"))
+
+    # crops that often contain vertical container markings
+    w, h = image.size
+    crops = [
+        image.crop((0, int(h * 0.05), int(w * 0.60), int(h * 0.95))),
+        image.crop((int(w * 0.45), int(h * 0.05), w, int(h * 0.95))),
+        image.crop((int(w * 0.15), int(h * 0.10), int(w * 0.85), int(h * 0.90))),
+    ]
+    for idx, c in enumerate(crops, start=1):
+        cgray = ImageOps.autocontrast(c.convert("L"))
+        cgray = ImageEnhance.Contrast(cgray).enhance(2.2)
+        add_variant(f"region{idx}", cgray.convert("RGB"))
+
+    return out[:6]
+
+
 def resolve_ocr_provider_chain() -> List[str]:
     provider = os.getenv("OCR_PROVIDER", "auto").strip().lower()
     chain: List[str] = []
@@ -731,8 +767,10 @@ def resolve_llm_model(base_url: str) -> Optional[str]:
 def build_llm_prompt(raw_text: str, containers: List[str], dates: List[str]) -> str:
     return (
         "Extract containerNo and date (MM/DD/YYYY) from OCR text. "
-        "Container should follow ISO 6346 (AAAA1234567). "
-        "Return strict JSON only with keys: containerNo, date."
+        "Use ISO 6346 as the reference standard. "
+        "A valid container is owner(3 letters)+category(U/J/Z)+6 serial digits+1 check digit. "
+        "If containerNo is not confidently ISO-valid, return an empty string for containerNo. "
+        "Never invent values. Return strict JSON only with keys: containerNo, date."
         f"\n\nOCR TEXT:\n{raw_text[:1200]}"
         f"\n\nCANDIDATE CONTAINERS: {containers}"
         f"\nCANDIDATE DATES: {dates}"
@@ -966,24 +1004,41 @@ async def scan(file: UploadFile = File(...)):
     ocr_chain = resolve_ocr_provider_chain()
     for ocr_provider in ocr_chain:
         if ocr_provider == "ocrspace":
-            ocr_input = raw
-            ocr_filename = filename
-            ocr_content_type = ctype or ("application/pdf" if is_pdf else "image/jpeg")
-            if is_pdf and image_for_ocr is not None and env_bool("OCR_SPACE_USE_RASTER_FOR_PDF", "0"):
-                raster = pil_to_jpeg_bytes(image_for_ocr)
-                if raster:
-                    ocr_input = raster
-                    ocr_filename = f"{Path(filename).stem}.jpg"
-                    ocr_content_type = "image/jpeg"
-            ocrspace_texts, ok, err = run_ocrspace(ocr_input, ocr_filename, ocr_content_type)
-            if ok and ocrspace_texts:
-                ocrspace_ok = True
-                pipeline_notes.append("ocr_ocrspace")
-                raw_text_parts.extend(ocrspace_texts)
-                if env_bool("OCR_STOP_ON_FIRST_SUCCESS", "1"):
-                    break
-            elif err:
-                pipeline_notes.append(err)
+            ocr_inputs: List[Tuple[bytes, str, str, str]] = []
+            if is_pdf:
+                ocr_input = raw
+                ocr_filename = filename
+                ocr_content_type = ctype or "application/pdf"
+                if image_for_ocr is not None and env_bool("OCR_SPACE_USE_RASTER_FOR_PDF", "0"):
+                    raster = pil_to_jpeg_bytes(image_for_ocr)
+                    if raster:
+                        ocr_input = raster
+                        ocr_filename = f"{Path(filename).stem}.jpg"
+                        ocr_content_type = "image/jpeg"
+                ocr_inputs.append((ocr_input, ocr_filename, ocr_content_type, "pdf"))
+            else:
+                if image_for_ocr is not None and env_bool("OCRSPACE_PREPROCESS", "1"):
+                    ocr_inputs.extend(ocrspace_image_inputs(image_for_ocr, filename))
+                else:
+                    ocr_inputs.append((raw, filename, ctype or "image/jpeg", "orig"))
+
+            seen_text = set()
+            for ocr_input, ocr_filename, ocr_content_type, ocr_tag in ocr_inputs:
+                ocrspace_texts, ok, err = run_ocrspace(ocr_input, ocr_filename, ocr_content_type)
+                if ok and ocrspace_texts:
+                    ocrspace_ok = True
+                    note = "ocr_ocrspace" if ocr_tag == "orig" else f"ocr_ocrspace_{ocr_tag}"
+                    pipeline_notes.append(note)
+                    for txt in ocrspace_texts:
+                        key = (txt or "").strip()
+                        if key and key not in seen_text:
+                            raw_text_parts.append(key)
+                            seen_text.add(key)
+                elif err:
+                    pipeline_notes.append(err)
+
+            if ocrspace_ok and env_bool("OCR_STOP_ON_FIRST_SUCCESS", "1"):
+                break
 
         elif ocr_provider == "local":
             tesseract_texts, t_ok, tess_err = run_tesseract(image_for_ocr)

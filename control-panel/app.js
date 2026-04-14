@@ -104,20 +104,34 @@
   async function healthCheck() {
     const backend = activeBackendUrl();
     if (!backend) {
-      setStatus("Backend: not set", false);
-      setHealthMeta(null);
-      return false;
+      try {
+        const local = await localApi("/health", { timeoutMs: 6000 });
+        setStatus("Backend: local online", true);
+        setHealthMeta(local);
+        return true;
+      } catch {
+        setStatus("Backend: not set", false);
+        setHealthMeta(null);
+        return false;
+      }
     }
 
     try {
-      const data = await apiWithBase(backend, "/health");
+      const data = await apiWithBase(backend, "/health", { timeoutMs: 8000 });
       setStatus("Backend: online", true);
       setHealthMeta(data);
       return true;
     } catch {
-      setStatus("Backend: offline", false);
-      setHealthMeta(null);
-      return false;
+      try {
+        const local = await localApi("/health", { timeoutMs: 6000 });
+        setStatus("Backend: public offline, local online", true);
+        setHealthMeta(local);
+        return true;
+      } catch {
+        setStatus("Backend: offline", false);
+        setHealthMeta(null);
+        return false;
+      }
     }
   }
 
