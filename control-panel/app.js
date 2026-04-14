@@ -344,7 +344,12 @@
     if (runtime?.publicBackendUrl) {
       setGeneratedBackend(runtime.publicBackendUrl);
     } else if (activeBackendUrl()) {
-      setGeneratedBackend(activeBackendUrl());
+      try {
+        await apiWithBase(activeBackendUrl(), "/health");
+        setGeneratedBackend(activeBackendUrl());
+      } catch {
+        localStorage.removeItem(LS_KEY_BACKEND);
+      }
     }
 
     await healthCheck();

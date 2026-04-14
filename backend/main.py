@@ -196,6 +196,13 @@ def parse_simple_meta(text: str) -> dict:
     return out
 
 
+def extract_latest_tunnel_url(path: Path, max_lines: int = 300) -> str:
+    lines = tail_text_if_exists(path, max_lines=max_lines)
+    joined = "\n".join(lines)
+    matches = re.findall(r"https://[a-z0-9-]+\.lhr\.life", joined, flags=re.I)
+    return matches[-1].strip() if matches else ""
+
+
 def normalize_container(value: str) -> str:
     text = re.sub(r"[^A-Z0-9]", "", (value or "").upper())
     if len(text) >= 4:
@@ -994,8 +1001,13 @@ def get_local_runtime_info():
     public_backend_url = read_text_if_exists(PUBLIC_BACKEND_URL_PATH)
     meta = parse_simple_meta(read_text_if_exists(PUBLIC_BACKEND_META_PATH))
 
+    latest_from_log = extract_latest_tunnel_url(TUNNEL_LOG_PATH)
+    if latest_from_log:
+        public_backend_url = latest_from_log
+
     if not public_backend_url and meta.get("backendUrl"):
         public_backend_url = meta.get("backendUrl", "")
+
 
     return {
         "ok": True,
