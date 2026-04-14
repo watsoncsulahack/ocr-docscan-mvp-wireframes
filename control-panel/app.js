@@ -73,7 +73,7 @@
     const parts = [];
     if (data.ocrProvider) parts.push(`OCR: ${data.ocrProvider}`);
     if (data.llmProvider) parts.push(`LLM: ${data.llmProvider}`);
-    if (typeof data.geminiApiKeySet === "boolean") parts.push(`Gemini key: ${data.geminiApiKeySet ? "set" : "missing"}`);
+    if (typeof data.llmApiKeySet === "boolean") parts.push(`LLM key: ${data.llmApiKeySet ? "set" : "missing"}`);
     if (typeof data.localControlApi === "boolean") parts.push(`Local control API: ${data.localControlApi ? "on" : "off"}`);
     el.textContent = parts.join(" | ");
   }
@@ -290,12 +290,12 @@
     });
   }
 
-  function wireGeminiSetupPanel() {
-    const keyInput = document.getElementById("geminiKeyInput");
-    const buildBtn = document.getElementById("buildGeminiCommandBtn");
-    const applyBtn = document.getElementById("applyGeminiKeyBtn");
-    const output = document.getElementById("geminiSetupCommandOutput");
-    const note = document.getElementById("geminiSetupNote");
+  function wireOpenRouterSetupPanel() {
+    const keyInput = document.getElementById("openrouterKeyInput");
+    const buildBtn = document.getElementById("buildOpenRouterCommandBtn");
+    const applyBtn = document.getElementById("applyOpenRouterKeyBtn");
+    const output = document.getElementById("openrouterSetupCommandOutput");
+    const note = document.getElementById("openrouterSetupNote");
 
     if (!buildBtn || !output) return;
 
@@ -304,29 +304,29 @@
       const base = `cd ${shellEscapeSingle(REPO_DIR)} && `;
 
       if (key) {
-        output.value = `${base}bash ./scripts/set_gemini_key.sh ${shellEscapeSingle(key)} && bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://openrouter.ai/api/v1 LLM_MODEL=openrouter/free LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "Command includes the key. Clear shell history if needed.";
       } else {
-        output.value = `${base}bash ./scripts/set_gemini_key.sh && bash ./scripts/share_demo_no_account.sh`;
-        if (note) note.textContent = "No key inserted. Script will prompt for key securely.";
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://openrouter.ai/api/v1 LLM_MODEL=openrouter/free OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        if (note) note.textContent = "No key inserted. Add key or use one-tap apply.";
       }
     });
 
     applyBtn?.addEventListener("click", async () => {
       const key = String(keyInput?.value || "").trim();
       if (!key) {
-        if (note) note.textContent = "Enter Gemini key first.";
+        if (note) note.textContent = "Enter OpenRouter key first.";
         return;
       }
       if (note) note.textContent = "Applying key to local backend...";
 
       try {
-        const out = await localApi("/control/local/gemini-key", {
+        const out = await localApi("/control/local/openrouter-key", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ apiKey: key }),
         });
-        if (note) note.textContent = out?.message || "Gemini key applied locally.";
+        if (note) note.textContent = out?.message || "OpenRouter key applied locally.";
       } catch (err) {
         if (note) note.textContent = `Apply failed. Run one-tap share script first. (${err.message})`;
       }
@@ -337,7 +337,7 @@
     setRevisionBadge();
     wireOneTapShare();
     wireRenderLinkHelper();
-    wireGeminiSetupPanel();
+    wireOpenRouterSetupPanel();
     wireCopyButtons();
 
     const runtime = await fetchRuntimeInfo();

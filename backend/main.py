@@ -831,7 +831,7 @@ class RecordIn(BaseModel):
     corrected: bool = False
 
 
-class LocalGeminiConfigIn(BaseModel):
+class LocalOpenRouterConfigIn(BaseModel):
     apiKey: str = Field(min_length=8, max_length=256)
 
 
@@ -862,6 +862,7 @@ def health():
         "pdfParserAvailable": bool(PdfReader is not None or pdfplumber is not None or fitz is not None),
         "doctrAvailable": bool(DocumentFile is not None and ocr_predictor is not None),
         "ocrSpaceApiKeySet": bool(os.getenv("OCR_SPACE_API_KEY")),
+        "llmApiKeySet": bool(os.getenv("LLM_API_KEY")),
         "geminiApiKeySet": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
         "localControlApi": env_bool("ENABLE_LOCAL_CONTROL_API", "0"),
     }
@@ -1037,23 +1038,29 @@ def get_local_runtime_info():
     }
 
 
-@app.post("/control/local/gemini-key")
-def set_local_gemini_key(payload: LocalGeminiConfigIn):
+@app.post("/control/local/openrouter-key")
+def set_local_openrouter_key(payload: LocalOpenRouterConfigIn):
     if not env_bool("ENABLE_LOCAL_CONTROL_API", "0"):
         raise HTTPException(status_code=403, detail="Local control API disabled")
 
     key = (payload.apiKey or "").strip()
     if not key:
-        raise HTTPException(status_code=400, detail="Gemini key is required")
+        raise HTTPException(status_code=400, detail="OpenRouter key is required")
 
     env_path = ROOT / ".env"
     upsert_env_values(
         env_path,
         {
-            "GEMINI_API_KEY": key,
-            "LLM_PROVIDER": "gemini",
+            "LLM_API_KEY": key,
+            "LLM_PROVIDER": "openai",
+            "LLM_BASE_URL": "https://openrouter.ai/api/v1",
+            "LLM_MODEL": os.getenv("OPENROUTER_MODEL", "openrouter/free"),
             "OCR_PROVIDER": "ocrspace",
             "ENABLE_LLM_POSTPROCESS": "1",
+            "OPENROUTER_APP_URL": os.getenv(
+                "OPENROUTER_APP_URL", "https://watsoncsulahack.github.io/ocr-docscan-mvp-wireframes/"
+            ),
+            "OPENROUTER_APP_TITLE": os.getenv("OPENROUTER_APP_TITLE", "OCR_DocScan_MVP"),
         },
     )
 
@@ -1062,18 +1069,24 @@ def set_local_gemini_key(payload: LocalGeminiConfigIn):
     except Exception:
         pass
 
-    os.environ["GEMINI_API_KEY"] = key
-    os.environ["LLM_PROVIDER"] = "gemini"
+    os.environ["LLM_API_KEY"] = key
+    os.environ["LLM_PROVIDER"] = "openai"
+    os.environ["LLM_BASE_URL"] = "https://openrouter.ai/api/v1"
+    os.environ["LLM_MODEL"] = os.getenv("OPENROUTER_MODEL", "openrouter/free")
     os.environ["OCR_PROVIDER"] = "ocrspace"
     os.environ["ENABLE_LLM_POSTPROCESS"] = "1"
+    os.environ["OPENROUTER_APP_URL"] = os.getenv(
+        "OPENROUTER_APP_URL", "https://watsoncsulahack.github.io/ocr-docscan-mvp-wireframes/"
+    )
+    os.environ["OPENROUTER_APP_TITLE"] = os.getenv("OPENROUTER_APP_TITLE", "OCR_DocScan_MVP")
     global LLM_MODEL_CACHE
     LLM_MODEL_CACHE = None
 
     return {
         "ok": True,
-        "message": "Gemini key saved to .env",
+        "message": "OpenRouter key saved to .env",
         "path": str(env_path),
-        "providers": {"ocr": "ocrspace", "llm": "gemini"},
+        "providers": {"ocr": "ocrspace", "llm": "openrouter"},
     }
 
 

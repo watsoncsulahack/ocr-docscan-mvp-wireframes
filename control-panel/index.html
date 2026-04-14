@@ -58,32 +58,32 @@
 
       <div class="hr"></div>
 
-      <h2 class="h2" style="margin-bottom: 10px;">Gemini Key Wiring</h2>
-      <p class="note">Create API key in AI Studio, then apply from this panel.</p>
-      <p class="note"><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Open AI Studio API Keys</a></p>
+      <h2 class="h2" style="margin-bottom: 10px;">OpenRouter Key Wiring</h2>
+      <p class="note">Paste your OpenRouter API key, then apply from this panel.</p>
+      <p class="note"><a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">Open OpenRouter API Keys</a></p>
 
       <div class="field">
-        <label class="label" for="geminiKeyInput">Gemini API key</label>
-        <input id="geminiKeyInput" class="input input-wide" type="password" placeholder="AIza..." />
+        <label class="label" for="openrouterKeyInput">OpenRouter API key</label>
+        <input id="openrouterKeyInput" class="input input-wide" type="password" placeholder="sk-or-v1-..." />
       </div>
 
       <div class="row" style="margin-bottom: 10px;">
-        <button id="applyGeminiKeyBtn" class="btn" type="button">Apply Key (One Tap)</button>
-        <button id="buildGeminiCommandBtn" class="btn" type="button">Build Fallback Command</button>
-        <button class="btn" data-copy-target="geminiSetupCommandOutput" type="button">Copy Command</button>
+        <button id="applyOpenRouterKeyBtn" class="btn" type="button">Apply Key (One Tap)</button>
+        <button id="buildOpenRouterCommandBtn" class="btn" type="button">Build Fallback Command</button>
+        <button class="btn" data-copy-target="openrouterSetupCommandOutput" type="button">Copy Command</button>
       </div>
 
       <div class="field">
-        <label class="label" for="geminiSetupCommandOutput">Fallback command (if one-tap apply fails)</label>
-        <textarea id="geminiSetupCommandOutput" class="input textarea" readonly></textarea>
+        <label class="label" for="openrouterSetupCommandOutput">Fallback command (if one-tap apply fails)</label>
+        <textarea id="openrouterSetupCommandOutput" class="input textarea" readonly></textarea>
       </div>
 
-      <p id="geminiSetupNote" class="note"></p>
+      <p id="openrouterSetupNote" class="note"></p>
 
       <p class="footer-note">Control panel is local to your device. GitHub Pages MVP stays unchanged.</p>
     </section>
   </main>
-  <script src="./config.js?v=20260414a"></script>
-  <script src="./app.js?v=20260414a"></script>
+  <script src="./config.js?v=20260414b"></script>
+  <script src="./app.js?v=20260414b"></script>
 </body>
 </html>
