@@ -266,6 +266,30 @@ def _ocr_digits(token: str) -> str:
     return token.translate(table)
 
 
+def _owner_variants(owner: str) -> List[str]:
+    o = normalize_container(owner)
+    out = []
+    if len(o) != 4:
+        return out
+    out.append(o)
+    last = o[3]
+    if last in ("G", "0", "O"):
+        out.append(o[:3] + "U")
+    if last in ("I", "1", "L"):
+        out.append(o[:3] + "J")
+    if last in ("2",):
+        out.append(o[:3] + "Z")
+
+    uniq = []
+    seen = set()
+    for v in out:
+        if v in seen:
+            continue
+        seen.add(v)
+        uniq.append(v)
+    return uniq
+
+
 def extract_container_candidates(raw_text: str) -> List[str]:
     text = re.sub(r"[^A-Z0-9\s]", " ", (raw_text or "").upper())
     candidates: List[str] = []
@@ -287,68 +311,56 @@ def extract_container_candidates(raw_text: str) -> List[str]:
 
     tokens = re.findall(r"[A-Z0-9]+", text)
     for i in range(len(tokens) - 1):
-        t1 = _ocr_letters(tokens[i])
         t2 = _ocr_digits(tokens[i + 1])
-        if re.fullmatch(r"[A-Z]{3,4}", t1) and re.fullmatch(r"[0-9]{7}", t2):
-            candidates.append(t1 + t2)
+        if not re.fullmatch(r"[0-9]{7}", t2):
+            continue
+        for owner in _owner_variants(_ocr_letters(tokens[i])):
+            if re.fullmatch(r"[A-Z]{3}[UJZ]", owner):
+                candidates.append(owner + t2)
+
     for i in range(len(tokens) - 2):
-        t1 = _ocr_letters(tokens[i])
         t2 = _ocr_digits(tokens[i + 1])
         t3 = _ocr_digits(tokens[i + 2])
-        if re.fullmatch(r"[A-Z]{3,4}", t1) and re.fullmatch(r"[0-9]{6}", t2) and re.fullmatch(r"[0-9]", t3):
-            candidates.append(t1 + t2 + t3)
+        owners = [o for o in _owner_variants(_ocr_letters(tokens[i])) if re.fullmatch(r"[A-Z]{3}[UJZ]", o)]
+        if not owners:
+            continue
+
+        # Standard 6+1 serial/check split.
+        if re.fullmatch(r"[0-9]{6}", t2) and re.fullmatch(r"[0-9]", t3):
+            for owner in owners:
+                candidates.append(owner + t2 + t3)
+
+        # OCR drift case: 7 digits then 1 extra digit (e.g. 1208297 + 3 -> 2082973).
+        if re.fullmatch(r"[0-9]{7}", t2) and re.fullmatch(r"[0-9]", t3):
+            for owner in owners:
+                candidates.append(owner + t2)
+                candidates.append(owner + t2[1:] + t3)
 
     # Missing check-digit recovery: SKYU 400093 -> compute SKYU4000932
     for m in re.finditer(r"\b([A-Z0-9]{3,4})\s*([0-9A-Z]{6})\b", text):
-        p1 = _ocr_letters(m.group(1))
         p2 = _ocr_digits(m.group(2))
-        prefix = normalize_container(f"{p1}{p2}")
-        if not re.fullmatch(r"[A-Z]{3}[UJZ][0-9]{6}", prefix):
-            continue
-        cd = iso6346_check_digit(prefix)
-        if cd is not None:
-            candidates.append(f"{prefix}{cd}")
+        for owner4 in _owner_variants(_ocr_letters(m.group(1))):
+            prefix = normalize_container(f"{owner4}{p2}")
+            if not re.fullmatch(r"[A-Z]{3}[UJZ][0-9]{6}", prefix):
+                continue
+            cd = iso6346_check_digit(prefix)
+            if cd is not None:
+                candidates.append(f"{prefix}{cd}")
 
-    # Loose token recovery when owner and serial are separated by other OCR noise tokens.
+    # Owner token + nearby serial6 recovery (handles words between owner and serial).
     for i in range(len(tokens)):
-        owner = normalize_container(_ocr_letters(tokens[i]))
+        owner = normalize_container(tokens[i])
         if not re.fullmatch(r"[A-Z]{3}[UJZ]", owner):
             continue
-        for j in range(i + 1, min(i + 12, len(tokens))):
-            serial7 = _ocr_digits(tokens[j])
-            if re.fullmatch(r"[0-9]{7}", serial7):
-                candidate = f"{owner}{serial7}"
-                if valid_container(candidate):
-                    candidates.append(candidate)
-                    break
-
-            serial6 = _ocr_digits(tokens[j])
-            if not re.fullmatch(r"[0-9]{6}", serial6):
+        for j in range(i + 1, min(i + 11, len(tokens))):
+            s6 = _ocr_digits(tokens[j])
+            if not re.fullmatch(r"[0-9]{6}", s6):
                 continue
-            prefix = f"{owner}{serial6}"
-            cd = iso6346_check_digit(prefix)
+            cd = iso6346_check_digit(owner + s6)
             if cd is not None:
-                candidates.append(f"{prefix}{cd}")
+                candidates.append(f"{owner}{s6}{cd}")
             break
 
-    # Reverse loose recovery: serial may appear before owner in OCR output.
-    for i in range(len(tokens)):
-        serial6 = _ocr_digits(tokens[i])
-        if not re.fullmatch(r"[0-9]{6}", serial6):
-            continue
-        lo = max(0, i - 12)
-        hi = min(len(tokens), i + 13)
-        for j in range(lo, hi):
-            if j == i:
-                continue
-            owner = normalize_container(_ocr_letters(tokens[j]))
-            if not re.fullmatch(r"[A-Z]{3}[UJZ]", owner):
-                continue
-            prefix = f"{owner}{serial6}"
-            cd = iso6346_check_digit(prefix)
-            if cd is not None:
-                candidates.append(f"{prefix}{cd}")
-                break
 
     seen = set()
     uniq: List[str] = []
