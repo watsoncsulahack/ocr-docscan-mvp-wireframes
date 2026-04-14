@@ -210,7 +210,7 @@ def normalize_container(value: str) -> str:
 
 
 def valid_container(value: str) -> bool:
-    return bool(CONTAINER_RE.fullmatch(normalize_container(value)))
+    return iso6346_is_valid(value)
 
 
 def valid_date(value: str) -> bool:
@@ -315,6 +315,25 @@ def extract_container_candidates(raw_text: str) -> List[str]:
                 candidates.append(f"{prefix}{cd}")
             break
 
+    # Reverse loose recovery: serial may appear before owner in OCR output.
+    for i in range(len(tokens)):
+        serial6 = _ocr_digits(tokens[i])
+        if not re.fullmatch(r"[0-9]{6}", serial6):
+            continue
+        lo = max(0, i - 12)
+        hi = min(len(tokens), i + 13)
+        for j in range(lo, hi):
+            if j == i:
+                continue
+            owner = normalize_container(_ocr_letters(tokens[j]))
+            if not re.fullmatch(r"[A-Z]{3}[UJZ]", owner):
+                continue
+            prefix = f"{owner}{serial6}"
+            cd = iso6346_check_digit(prefix)
+            if cd is not None:
+                candidates.append(f"{prefix}{cd}")
+                break
+
     seen = set()
     uniq: List[str] = []
     for c in candidates:
@@ -326,7 +345,25 @@ def extract_container_candidates(raw_text: str) -> List[str]:
         seen.add(n)
         uniq.append(n)
 
-    uniq.sort(key=lambda c: (0 if iso6346_is_valid(c) else 1, c))
+    owner_tokens = {
+        normalize_container(_ocr_letters(t))
+        for t in tokens
+        if re.fullmatch(r"[A-Z]{3}[UJZ]", normalize_container(_ocr_letters(t)))
+    }
+
+    def _rank(c: str):
+        owner = c[:4]
+        serial = c[4:10]
+        owner_seen = owner in owner_tokens
+        serial_seen = any(_ocr_digits(t) == serial for t in tokens)
+        return (
+            0 if iso6346_is_valid(c) else 1,
+            0 if owner_seen else 1,
+            0 if serial_seen else 1,
+            c,
+        )
+
+    uniq.sort(key=_rank)
     return uniq
 
 
@@ -906,7 +943,9 @@ async def scan(file: UploadFile = File(...)):
     elif llm_error:
         pipeline_notes.append(llm_error)
 
-    extracted_container = (llm_structured or {}).get("containerNo") or (containers[0] if containers else "")
+    valid_containers = [c for c in containers if valid_container(c)]
+    fallback_container = valid_containers[0] if valid_containers else ""
+    extracted_container = (llm_structured or {}).get("containerNo") or fallback_container
 
     llm_date = (llm_structured or {}).get("date") or ""
     if dates:
@@ -916,9 +955,9 @@ async def scan(file: UploadFile = File(...)):
         extracted_date = dt.datetime.now().strftime("%m/%d/%Y")
 
     issues = []
-    if not containers and not extracted_container:
+    if not valid_containers and not extracted_container:
         issues.append("no_container_found")
-    elif len(containers) > 1:
+    elif len(valid_containers) > 1:
         issues.append("multiple_container_matches")
 
     if not dates and not valid_date(extracted_date):
