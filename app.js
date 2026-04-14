@@ -198,6 +198,11 @@
       dbg.textContent = lines.join("\n");
     }
 
+    const pipelineNotes = Array.isArray(scan?.pipeline) ? scan.pipeline : [];
+    if (msg && pipelineNotes.some((p) => String(p).startsWith("ocrspace_http_403"))) {
+      msg.textContent = "Warning: OCR.Space degraded (HTTP 403). Falling back to local OCR may reduce accuracy.";
+    }
+
     confirmBtn.addEventListener("click", async () => {
       const payload = {
         containerNo: String(containerInput.value || "").trim(),

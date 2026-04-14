@@ -1162,9 +1162,10 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
             "LLM_API_KEY": key,
             "LLM_PROVIDER": "openai",
             "LLM_BASE_URL": "https://api.groq.com/openai",
-            "LLM_MODEL": os.getenv("GROQ_MODEL", ""),
-            "LLM_INCLUDE_IMAGE": "0",
-            "OCR_PROVIDER": "ocrspace",
+            "LLM_MODEL": os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            "LLM_INCLUDE_IMAGE": "1",
+            "OCR_PROVIDER": "auto",
+            "OCR_FALLBACK_LOCAL": "1",
             "ENABLE_LLM_POSTPROCESS": "1",
         },
     )
@@ -1177,9 +1178,10 @@ def set_local_groq_key(payload: LocalGroqConfigIn):
     os.environ["LLM_API_KEY"] = key
     os.environ["LLM_PROVIDER"] = "openai"
     os.environ["LLM_BASE_URL"] = "https://api.groq.com/openai"
-    os.environ["LLM_MODEL"] = os.getenv("GROQ_MODEL", "")
-    os.environ["LLM_INCLUDE_IMAGE"] = "0"
-    os.environ["OCR_PROVIDER"] = "ocrspace"
+    os.environ["LLM_MODEL"] = os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    os.environ["LLM_INCLUDE_IMAGE"] = "1"
+    os.environ["OCR_PROVIDER"] = "auto"
+    os.environ["OCR_FALLBACK_LOCAL"] = "1"
     os.environ["ENABLE_LLM_POSTPROCESS"] = "1"
     global LLM_MODEL_CACHE
     LLM_MODEL_CACHE = None

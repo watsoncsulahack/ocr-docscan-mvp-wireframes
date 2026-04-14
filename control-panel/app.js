@@ -330,10 +330,10 @@
       const base = `cd ${shellEscapeSingle(REPO_DIR)} && `;
 
       if (key) {
-        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai LLM_MODEL=llama-3.1-8b-instant LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai LLM_MODEL=meta-llama/llama-4-scout-17b-16e-instruct LLM_INCLUDE_IMAGE=1 LLM_API_KEY=${shellEscapeSingle(key)} OCR_PROVIDER=auto OCR_FALLBACK_LOCAL=1 ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "Command includes the key. Clear shell history if needed.";
       } else {
-        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai LLM_MODEL=llama-3.1-8b-instant OCR_PROVIDER=ocrspace ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
+        output.value = `${base}LLM_PROVIDER=openai LLM_BASE_URL=https://api.groq.com/openai LLM_MODEL=meta-llama/llama-4-scout-17b-16e-instruct LLM_INCLUDE_IMAGE=1 OCR_PROVIDER=auto OCR_FALLBACK_LOCAL=1 ENABLE_LLM_POSTPROCESS=1 bash ./scripts/share_demo_no_account.sh`;
         if (note) note.textContent = "No key inserted. Add key or use one-tap apply.";
       }
     });
