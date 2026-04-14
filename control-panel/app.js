@@ -237,7 +237,7 @@
     }
   }
 
-  async function waitForPublicBackendUrl(maxWaitMs = 45000) {
+  async function waitForPublicBackendUrl(maxWaitMs = 90000) {
     const startedAt = Date.now();
     let latest = {};
 
@@ -264,7 +264,7 @@
         await supervisorRequest("/activate", "POST", { id: "ocr-mvp-share" });
         if (msg) msg.textContent = "Share script started. Waiting for public URL...";
 
-        const result = await waitForPublicBackendUrl(50000);
+        const result = await waitForPublicBackendUrl(90000);
         if (result.url) {
           setGeneratedBackend(result.url);
           if (msg) msg.textContent = `Success. Public backend URL is ready: ${result.url}`;
