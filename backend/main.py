@@ -1,5 +1,6 @@
 import base64
 import datetime as dt
+import hashlib
 import io
 import json
 import os
@@ -7,7 +8,7 @@ import re
 import sqlite3
 import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import error as url_error
 from urllib import request as url_request
 
@@ -138,6 +139,105 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_records_createdAt ON records(createdAt DESC);
         CREATE INDEX IF NOT EXISTS idx_records_containerNo ON records(containerNo);
+
+        CREATE TABLE IF NOT EXISTS submissions (
+          id TEXT PRIMARY KEY,
+          source_file_name TEXT NOT NULL,
+          file_type TEXT NOT NULL,
+          classifier TEXT NOT NULL,
+          status TEXT NOT NULL,
+          uploaded_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          file_sha256 TEXT,
+          dedupe_key TEXT,
+          duplicate_of TEXT,
+          fallback_date_used INTEGER NOT NULL DEFAULT 0,
+          fallback_date_value TEXT,
+          notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS document_files (
+          id TEXT PRIMARY KEY,
+          submission_id TEXT NOT NULL,
+          original_filename TEXT,
+          source_file_name TEXT NOT NULL,
+          file_type TEXT NOT NULL,
+          file_sha256 TEXT,
+          storage_path TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(submission_id) REFERENCES submissions(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS extraction_results (
+          id TEXT PRIMARY KEY,
+          submission_id TEXT NOT NULL,
+          classifier TEXT NOT NULL,
+          raw_text TEXT,
+          confidence_summary REAL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(submission_id) REFERENCES submissions(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS extracted_fields (
+          id TEXT PRIMARY KEY,
+          submission_id TEXT NOT NULL,
+          extraction_result_id TEXT,
+          field_name TEXT NOT NULL,
+          field_value TEXT,
+          confidence REAL,
+          is_required INTEGER NOT NULL DEFAULT 0,
+          source TEXT NOT NULL DEFAULT 'extraction',
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(submission_id) REFERENCES submissions(id),
+          FOREIGN KEY(extraction_result_id) REFERENCES extraction_results(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS review_tasks (
+          id TEXT PRIMARY KEY,
+          submission_id TEXT NOT NULL,
+          reason_code TEXT NOT NULL,
+          status TEXT NOT NULL,
+          assigned_to TEXT,
+          created_at TEXT NOT NULL,
+          resolved_at TEXT,
+          resolution_note TEXT,
+          FOREIGN KEY(submission_id) REFERENCES submissions(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS verified_records (
+          id TEXT PRIMARY KEY,
+          submission_id TEXT NOT NULL,
+          classifier TEXT NOT NULL,
+          normalized_payload TEXT NOT NULL,
+          approved_by TEXT,
+          approved_at TEXT NOT NULL,
+          FOREIGN KEY(submission_id) REFERENCES submissions(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id TEXT PRIMARY KEY,
+          submission_id TEXT,
+          action TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          details TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(submission_id) REFERENCES submissions(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
+        CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_submissions_file_sha256 ON submissions(file_sha256);
+        CREATE INDEX IF NOT EXISTS idx_submissions_dedupe_key ON submissions(dedupe_key);
+        CREATE INDEX IF NOT EXISTS idx_document_files_submission_id ON document_files(submission_id);
+        CREATE INDEX IF NOT EXISTS idx_extraction_results_submission_id ON extraction_results(submission_id);
+        CREATE INDEX IF NOT EXISTS idx_extracted_fields_submission_id ON extracted_fields(submission_id);
+        CREATE INDEX IF NOT EXISTS idx_extracted_fields_name ON extracted_fields(field_name);
+        CREATE INDEX IF NOT EXISTS idx_review_tasks_submission_id ON review_tasks(submission_id);
+        CREATE INDEX IF NOT EXISTS idx_review_tasks_status ON review_tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_verified_records_submission_id ON verified_records(submission_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_submission_id ON audit_logs(submission_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
         """
     )
     conn.commit()
@@ -1327,3 +1427,481 @@ def reset_demo(payload: ResetIn):
     conn.commit()
     conn.close()
     return {"ok": True, "deletedCount": deleted}
+
+
+# -----------------------------
+# Sprint 3 Phase 1 foundations
+# -----------------------------
+
+SUPPORTED_FILE_TYPES = {"pdf", "png", "jpg", "jpeg", "webp", "gif", "tiff", "bmp"}
+SUPPORTED_CLASSIFIERS = {"container", "receipt", "other"}
+REQUIRED_FIELDS_BY_CLASSIFIER = {
+    "container": ["container_number", "event_date"],
+    "receipt": ["transaction_date"],
+    "other": [],
+}
+CONFIDENCE_THRESHOLD = 0.80
+
+
+def db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def strip_extension(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return "upload"
+    return re.sub(r"\.[A-Za-z0-9]+$", "", text)
+
+
+def normalize_file_type(value: str) -> str:
+    return (value or "").strip().lower().replace(".", "")
+
+
+def normalize_classifier(value: str) -> str:
+    text = (value or "other").strip().lower()
+    return text if text in SUPPORTED_CLASSIFIERS else "other"
+
+
+def compute_sha256(file_b64: Optional[str], source_name: str, file_type: str, extracted: Dict[str, Any]) -> str:
+    if file_b64:
+        raw = base64.b64decode(file_b64)
+        return hashlib.sha256(raw).hexdigest()
+    fallback = json.dumps({"source": source_name, "fileType": file_type, "extracted": extracted}, sort_keys=True)
+    return hashlib.sha256(fallback.encode("utf-8")).hexdigest()
+
+
+def compute_dedupe_key(classifier: str, extracted: Dict[str, Any], file_sha256: str) -> str:
+    if classifier == "container":
+        c = (extracted.get("container_number") or "").strip().upper()
+        d = (extracted.get("event_date") or "").strip()
+        return f"container:{c}|{d}" if c or d else f"sha:{file_sha256}"
+    if classifier == "receipt":
+        d = (extracted.get("transaction_date") or "").strip()
+        v = (extracted.get("vendor_name") or "").strip().lower()
+        a = str(extracted.get("amount") or "").strip()
+        return f"receipt:{d}|{v}|{a}" if d or v or a else f"sha:{file_sha256}"
+    return f"sha:{file_sha256}"
+
+
+def add_audit(conn: sqlite3.Connection, submission_id: Optional[str], action: str, actor: str, details: Dict[str, Any]) -> None:
+    conn.execute(
+        "INSERT INTO audit_logs(id, submission_id, action, actor, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), submission_id, action, actor, json.dumps(details), now_iso()),
+    )
+
+
+def evaluate_rules(classifier: str, extracted: Dict[str, Any], confidence: Dict[str, float], uploaded_at_iso: str, duplicate_found: bool) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    rules: List[Dict[str, Any]] = []
+    working = dict(extracted)
+    required = REQUIRED_FIELDS_BY_CLASSIFIER.get(classifier, [])
+
+    def push(rule_id: str, passed: bool, reason: str, severity: str):
+        rules.append({"rule_id": rule_id, "passed": passed, "reason": reason, "severity": severity})
+
+    if classifier == "other":
+        push("unsupported_document_rule", False, "Unsupported classifier routed to review.", "error")
+    else:
+        push("unsupported_document_rule", True, "Classifier is supported.", "info")
+
+    # Date fallback rule
+    date_key = "event_date" if classifier == "container" else "transaction_date" if classifier == "receipt" else None
+    fallback_used = False
+    fallback_value = None
+    if date_key:
+        if not (working.get(date_key) or "").strip():
+            fallback_value = dt.datetime.fromisoformat(uploaded_at_iso).strftime("%m/%d/%Y")
+            working[date_key] = fallback_value
+            fallback_used = True
+            push("date_fallback_rule", True, f"Missing {date_key}; applied upload timestamp fallback.", "warn")
+        else:
+            push("date_fallback_rule", True, f"{date_key} present; no fallback used.", "info")
+    else:
+        push("date_fallback_rule", True, "No date requirement for this classifier.", "info")
+
+    missing = [f for f in required if not (working.get(f) or "").strip()]
+    if missing:
+        push("required_field_rule", False, f"Missing required fields: {', '.join(missing)}", "error")
+        push("missing_data_rule", False, "Manual input required for missing fields.", "error")
+    else:
+        push("required_field_rule", True, "All required fields present.", "info")
+        push("missing_data_rule", True, "No missing required fields.", "info")
+
+    low_conf = []
+    for f in required:
+        score = confidence.get(f)
+        if score is not None and float(score) < CONFIDENCE_THRESHOLD:
+            low_conf.append(f"{f}<{CONFIDENCE_THRESHOLD}")
+    if low_conf:
+        push("confidence_threshold_rule", False, f"Low confidence required fields: {', '.join(low_conf)}", "warn")
+    else:
+        push("confidence_threshold_rule", True, "Required fields satisfy confidence threshold or no score provided.", "info")
+
+    if duplicate_found:
+        push("duplicate_detection_rule", False, "Potential duplicate detected.", "warn")
+    else:
+        push("duplicate_detection_rule", True, "No duplicate detected.", "info")
+
+    any_error = any((not r["passed"] and r["severity"] == "error") for r in rules)
+    any_warn_fail = any((not r["passed"] and r["severity"] == "warn") for r in rules)
+
+    if duplicate_found:
+        status = "DUPLICATE"
+    elif any_error or any_warn_fail:
+        status = "NEEDS_REVIEW"
+    else:
+        status = "APPROVED"
+
+    push("audit_rule", True, "Changes and transitions recorded in audit_logs.", "info")
+
+    return rules, {
+        "status": status,
+        "normalized_extracted": working,
+        "fallback_date_used": fallback_used,
+        "fallback_date_value": fallback_value,
+    }
+
+
+def fetch_submission_bundle(submission_id: str) -> Optional[Dict[str, Any]]:
+    conn = db_connect()
+    sub = conn.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+    if not sub:
+        conn.close()
+        return None
+
+    extraction = conn.execute("SELECT * FROM extraction_results WHERE submission_id = ? ORDER BY created_at DESC LIMIT 1", (submission_id,)).fetchone()
+    fields = conn.execute("SELECT field_name, field_value, confidence, is_required, source FROM extracted_fields WHERE submission_id = ?", (submission_id,)).fetchall()
+    reviews = conn.execute("SELECT * FROM review_tasks WHERE submission_id = ? ORDER BY created_at DESC", (submission_id,)).fetchall()
+    verified = conn.execute("SELECT * FROM verified_records WHERE submission_id = ? ORDER BY approved_at DESC LIMIT 1", (submission_id,)).fetchone()
+    audit = conn.execute("SELECT * FROM audit_logs WHERE submission_id = ? ORDER BY created_at DESC", (submission_id,)).fetchall()
+    conn.close()
+
+    return {
+        "submission": dict(sub),
+        "extractionResult": dict(extraction) if extraction else None,
+        "extractedFields": [dict(f) for f in fields],
+        "reviewTasks": [dict(r) for r in reviews],
+        "verifiedRecord": dict(verified) if verified else None,
+        "audit": [dict(a) for a in audit],
+    }
+
+
+class SubmissionIn(BaseModel):
+    sourceFileName: str
+    fileType: str
+    classifier: Optional[str] = "other"
+    originalFileName: Optional[str] = None
+    extracted: Optional[Dict[str, Any]] = None
+    confidence: Optional[Dict[str, float]] = None
+    rawText: Optional[str] = None
+    fileContentBase64: Optional[str] = None
+    uploadedAt: Optional[str] = None
+
+
+class ReviewActionIn(BaseModel):
+    actor: Optional[str] = "user"
+    corrections: Optional[Dict[str, Any]] = None
+    note: Optional[str] = None
+
+
+class ApproveIn(BaseModel):
+    actor: Optional[str] = "admin"
+    verifiedFields: Optional[Dict[str, Any]] = None
+    note: Optional[str] = None
+
+
+class RejectIn(BaseModel):
+    actor: Optional[str] = "admin"
+    reason: str
+
+
+@app.post("/submit")
+def submit_document(payload: SubmissionIn):
+    source_file_name = strip_extension(payload.sourceFileName)
+    file_type = normalize_file_type(payload.fileType)
+    classifier = normalize_classifier(payload.classifier or "other")
+    extracted = payload.extracted or {}
+    confidence = payload.confidence or {}
+    uploaded_at = payload.uploadedAt or now_iso()
+
+    if file_type not in SUPPORTED_FILE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported fileType '{file_type}'.")
+
+    submission_id = str(uuid.uuid4())
+    now = now_iso()
+    file_sha256 = compute_sha256(payload.fileContentBase64, source_file_name, file_type, extracted)
+    dedupe_key = compute_dedupe_key(classifier, extracted, file_sha256)
+
+    conn = db_connect()
+    existing = conn.execute(
+        "SELECT id FROM submissions WHERE file_sha256 = ? OR dedupe_key = ? ORDER BY created_at DESC LIMIT 1",
+        (file_sha256, dedupe_key),
+    ).fetchone()
+    duplicate_of = existing["id"] if existing else None
+
+    rule_results, eval_out = evaluate_rules(
+        classifier=classifier,
+        extracted=extracted,
+        confidence=confidence,
+        uploaded_at_iso=uploaded_at,
+        duplicate_found=bool(duplicate_of),
+    )
+
+    status = eval_out["status"]
+    normalized = eval_out["normalized_extracted"]
+
+    conn.execute(
+        """
+        INSERT INTO submissions(
+            id, source_file_name, file_type, classifier, status,
+            uploaded_at, created_at, updated_at, file_sha256, dedupe_key,
+            duplicate_of, fallback_date_used, fallback_date_value, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            submission_id,
+            source_file_name,
+            file_type,
+            classifier,
+            status,
+            uploaded_at,
+            now,
+            now,
+            file_sha256,
+            dedupe_key,
+            duplicate_of,
+            1 if eval_out["fallback_date_used"] else 0,
+            eval_out["fallback_date_value"],
+            "",
+        ),
+    )
+
+    doc_file_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO document_files(id, submission_id, original_filename, source_file_name, file_type, file_sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            doc_file_id,
+            submission_id,
+            payload.originalFileName,
+            source_file_name,
+            file_type,
+            file_sha256,
+            None,
+            now,
+        ),
+    )
+
+    extraction_id = str(uuid.uuid4())
+    confidence_summary = None
+    if confidence:
+        vals = [float(v) for v in confidence.values()]
+        confidence_summary = sum(vals) / len(vals)
+
+    conn.execute(
+        "INSERT INTO extraction_results(id, submission_id, classifier, raw_text, confidence_summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (extraction_id, submission_id, classifier, payload.rawText, confidence_summary, now),
+    )
+
+    required_fields = set(REQUIRED_FIELDS_BY_CLASSIFIER.get(classifier, []))
+    for field_name, field_value in normalized.items():
+        conf = confidence.get(field_name)
+        conn.execute(
+            "INSERT INTO extracted_fields(id, submission_id, extraction_result_id, field_name, field_value, confidence, is_required, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                submission_id,
+                extraction_id,
+                field_name,
+                str(field_value) if field_value is not None else None,
+                conf,
+                1 if field_name in required_fields else 0,
+                "extraction",
+                now,
+            ),
+        )
+
+    if status in ("NEEDS_REVIEW", "DUPLICATE"):
+        reasons = [r["rule_id"] for r in rule_results if not r["passed"]]
+        conn.execute(
+            "INSERT INTO review_tasks(id, submission_id, reason_code, status, assigned_to, created_at, resolved_at, resolution_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), submission_id, ",".join(reasons) or "manual_review", "OPEN", None, now, None, None),
+        )
+
+    if status == "APPROVED":
+        conn.execute(
+            "INSERT INTO verified_records(id, submission_id, classifier, normalized_payload, approved_by, approved_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), submission_id, classifier, json.dumps(normalized), "system", now),
+        )
+
+    add_audit(conn, submission_id, "SUBMIT", "user", {"sourceFileName": source_file_name, "fileType": file_type, "classifier": classifier})
+    add_audit(conn, submission_id, "VALIDATE", "system", {"rules": rule_results, "status": status})
+    add_audit(conn, submission_id, "STATUS_ROUTE", "system", {"status": status, "duplicateOf": duplicate_of})
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "submissionId": submission_id,
+        "status": status,
+        "ruleResults": rule_results,
+        "duplicateOf": duplicate_of,
+        "normalizedExtracted": normalized,
+    }
+
+
+@app.get("/submission/{submission_id}")
+def get_submission(submission_id: str):
+    data = fetch_submission_bundle(submission_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    return {"ok": True, **data}
+
+
+@app.get("/submissions")
+def list_submissions(status: Optional[str] = None):
+    conn = db_connect()
+    if status:
+        rows = conn.execute(
+            "SELECT id, source_file_name, file_type, classifier, status, created_at, updated_at, duplicate_of FROM submissions WHERE status = ? ORDER BY created_at DESC",
+            (status,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, source_file_name, file_type, classifier, status, created_at, updated_at, duplicate_of FROM submissions ORDER BY created_at DESC"
+        ).fetchall()
+    conn.close()
+    return {"ok": True, "submissions": [dict(r) for r in rows]}
+
+
+@app.post("/review/{submission_id}")
+def review_submission(submission_id: str, payload: ReviewActionIn):
+    corrections = payload.corrections or {}
+    actor = payload.actor or "user"
+    conn = db_connect()
+    sub = conn.execute("SELECT id, status FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+    if not sub:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    now = now_iso()
+    for field_name, field_value in corrections.items():
+        current = conn.execute(
+            "SELECT id FROM extracted_fields WHERE submission_id = ? AND field_name = ? ORDER BY created_at DESC LIMIT 1",
+            (submission_id, field_name),
+        ).fetchone()
+        if current:
+            conn.execute(
+                "UPDATE extracted_fields SET field_value = ?, source = ? WHERE id = ?",
+                (str(field_value) if field_value is not None else None, "manual_review", current["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO extracted_fields(id, submission_id, extraction_result_id, field_name, field_value, confidence, is_required, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), submission_id, None, field_name, str(field_value), None, 0, "manual_review", now),
+            )
+
+    conn.execute("UPDATE submissions SET updated_at = ?, status = ? WHERE id = ?", (now, "NEEDS_REVIEW", submission_id))
+    conn.execute(
+        "UPDATE review_tasks SET status = ?, resolution_note = ?, resolved_at = ? WHERE submission_id = ? AND status = 'OPEN'",
+        ("IN_PROGRESS", payload.note, None, submission_id),
+    )
+    add_audit(conn, submission_id, "REVIEW_EDIT", actor, {"corrections": corrections, "note": payload.note})
+    conn.commit()
+    conn.close()
+
+    return {"ok": True, "submissionId": submission_id, "status": "NEEDS_REVIEW"}
+
+
+@app.post("/approve/{submission_id}")
+def approve_submission(submission_id: str, payload: ApproveIn):
+    actor = payload.actor or "admin"
+    conn = db_connect()
+    sub = conn.execute("SELECT id, classifier FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+    if not sub:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    now = now_iso()
+    if payload.verifiedFields:
+        normalized_payload = payload.verifiedFields
+    else:
+        rows = conn.execute("SELECT field_name, field_value FROM extracted_fields WHERE submission_id = ?", (submission_id,)).fetchall()
+        normalized_payload = {r["field_name"]: r["field_value"] for r in rows}
+
+    existing = conn.execute("SELECT id FROM verified_records WHERE submission_id = ?", (submission_id,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE verified_records SET classifier = ?, normalized_payload = ?, approved_by = ?, approved_at = ? WHERE id = ?",
+            (sub["classifier"], json.dumps(normalized_payload), actor, now, existing["id"]),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO verified_records(id, submission_id, classifier, normalized_payload, approved_by, approved_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), submission_id, sub["classifier"], json.dumps(normalized_payload), actor, now),
+        )
+
+    conn.execute("UPDATE submissions SET status = ?, updated_at = ? WHERE id = ?", ("APPROVED", now, submission_id))
+    conn.execute(
+        "UPDATE review_tasks SET status = ?, resolved_at = ?, resolution_note = ? WHERE submission_id = ? AND status IN ('OPEN','IN_PROGRESS')",
+        ("RESOLVED", now, payload.note, submission_id),
+    )
+    add_audit(conn, submission_id, "APPROVE", actor, {"note": payload.note})
+    conn.commit()
+    conn.close()
+    return {"ok": True, "submissionId": submission_id, "status": "APPROVED"}
+
+
+@app.post("/reject/{submission_id}")
+def reject_submission(submission_id: str, payload: RejectIn):
+    actor = payload.actor or "admin"
+    conn = db_connect()
+    sub = conn.execute("SELECT id FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+    if not sub:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    now = now_iso()
+    conn.execute("UPDATE submissions SET status = ?, updated_at = ? WHERE id = ?", ("REJECTED", now, submission_id))
+    conn.execute(
+        "UPDATE review_tasks SET status = ?, resolved_at = ?, resolution_note = ? WHERE submission_id = ? AND status IN ('OPEN','IN_PROGRESS')",
+        ("REJECTED", now, payload.reason, submission_id),
+    )
+    add_audit(conn, submission_id, "REJECT", actor, {"reason": payload.reason})
+    conn.commit()
+    conn.close()
+    return {"ok": True, "submissionId": submission_id, "status": "REJECTED"}
+
+
+@app.get("/admin/submissions")
+def admin_submissions(status: Optional[str] = None):
+    return list_submissions(status=status)
+
+
+@app.get("/admin/flagged")
+def admin_flagged():
+    conn = db_connect()
+    rows = conn.execute(
+        "SELECT id, source_file_name, file_type, classifier, status, created_at, duplicate_of FROM submissions WHERE status IN ('NEEDS_REVIEW','DUPLICATE') ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return {"ok": True, "submissions": [dict(r) for r in rows]}
+
+
+@app.get("/admin/audit")
+def admin_audit(submissionId: Optional[str] = None, limit: int = 200):
+    conn = db_connect()
+    if submissionId:
+        rows = conn.execute(
+            "SELECT id, submission_id, action, actor, details, created_at FROM audit_logs WHERE submission_id = ? ORDER BY created_at DESC LIMIT ?",
+            (submissionId, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, submission_id, action, actor, details, created_at FROM audit_logs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return {"ok": True, "audit": [dict(r) for r in rows]}

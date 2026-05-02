@@ -21,22 +21,30 @@ Establish a shared, testable contract before implementation so Sprint 3 can be b
 
 ---
 
-## 2) Document Type Contract
-### A) Container Document
-Required fields:
-- `container_number`
-- `event_date`
+## 2) Document Contract (file type + classifier)
+### A) File Type (technical)
+`fileType` identifies the actual file format, for example:
+- `pdf`
+- `png`
+- `jpg` / `jpeg`
 
-### B) Receipt / Proof Document
-Required fields:
-- `transaction_date`
+### B) Source File Name
+`sourceFileName` should be normalized to filename **without extension**.
 
-Optional fields:
+### C) Classifier (semantic)
+`classifier` indicates document meaning:
+- `container`
+- `receipt`
+- `other`
+
+Required fields by classifier:
+- `container`: `container_number`, `event_date`
+- `receipt`: `transaction_date`
+- `other`: route to review as unsupported
+
+Optional receipt fields:
 - `vendor_name`
 - `amount`
-
-### C) Unsupported
-- Must route to review with reason `unsupported_document_type`.
 
 ---
 
