@@ -32,6 +32,18 @@ body {
   font-size: 1.6rem;
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .hero p {
   margin: 8px 0 0;
   color: var(--muted);

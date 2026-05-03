@@ -3,36 +3,44 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OCR MVP Wireframes</title>
+  <title>OCR MVP Demo</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
-<body data-page="index">
-  <main class="page">
+<body data-page="upload">
+  <main class="container">
+    <header class="hero">
+      <div class="title-row">
+        <h1>OCR MVP Demo</h1>
+        <div class="status-indicator" aria-label="confidence colors">
+          <span class="confidence-dot green" title="Green"></span>
+          <span class="confidence-dot yellow" title="Yellow"></span>
+          <span class="confidence-dot red" title="Red"></span>
+        </div>
+      </div>
+      <p>Select a file to upload and process.</p>
+    </header>
+
     <section class="card">
-      <div class="topbar">
-        <h1 class="h1">OCR MVP Demo</h1>
-        <span id="backendStatus" class="status-chip">Backend: checking...</span>
-      </div>
-      <div class="hr"></div>
-
-      <p class="note">Set backend URL once, then use the screens below.</p>
-      <div class="row" style="align-items:center; margin: 10px 0 16px;">
-        <input id="backendUrlInput" class="input" style="max-width: 520px;" placeholder="https://your-backend-url" />
-        <button id="saveBackendUrlBtn" class="btn" type="button">Save Backend URL</button>
+      <div class="drop-zone">
+        <input id="fileInput" type="file" accept=".pdf,image/*" />
       </div>
 
-      <div class="nav-grid">
-        <a class="btn" href="./upload.html">1. Upload Screen</a>
-        <a class="btn" href="./processing.html">2. Processing Screen</a>
-        <a class="btn" href="./review.html">3. Review Screen</a>
-        <a class="btn" href="./confirmation.html">4. Confirmation Screen</a>
-        <a class="btn" href="./records.html">5. Stored Records Screen</a>
+      <div class="actions-inline">
+        <button id="openCamera" class="btn secondary" type="button">Use Camera</button>
       </div>
 
-      <p class="footer-note">Frontend is wired to backend health and API state for live demo.</p>
+      <p id="fileMeta" class="muted">No file selected.</p>
+      <img id="filePreview" class="preview hidden" alt="Selected file preview" />
+      <div id="uploadError" class="error hidden"></div>
+
+      <div class="actions">
+        <button id="processBtn" class="btn" type="button" disabled>Process</button>
+      </div>
+
+      <p class="muted">Supported file types: PNG, JPEG, PDF</p>
     </section>
   </main>
-  <script src="./config.js?v=20260414o"></script>
-  <script src="./app.js?v=20260414o"></script>
+
+  <script src="./app.js"></script>
 </body>
 </html>
