@@ -77,6 +77,17 @@
     return dataUrl.split(",")[1] || "";
   }
 
+  function dataUrlToBlob(dataUrl, mimeType) {
+    const b64 = dataUrlToBase64(dataUrl);
+    const binary = atob(b64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mimeType || "application/octet-stream" });
+  }
+
   function extFromFileName(name) {
     const m = (name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
     return m ? m[1] : "";
@@ -214,16 +225,13 @@
       msg.textContent = "Running scan...";
       step2?.classList.add("active");
       const backend = await resolveBackendUrl();
-      const payload = {
-        sourceFileName: file.name,
-        mimeType: file.type || "application/octet-stream",
-        imageBase64: dataUrlToBase64(file.dataUrl),
-      };
+      const blob = dataUrlToBlob(file.dataUrl, file.type || "application/octet-stream");
+      const form = new FormData();
+      form.append("file", blob, file.name || "upload.bin");
 
       const res = await fetch(`${backend}/scan`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: form,
       });
 
       if (!res.ok) {
