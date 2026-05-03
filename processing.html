@@ -7,27 +7,26 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body data-page="processing">
-  <main class="page">
+  <main class="container">
+    <header class="hero">
+      <h1>Processing</h1>
+      <p>We are scanning your file now.</p>
+    </header>
+
     <section class="card">
-      <div class="topbar">
-        <h2 class="h2">Processing Document...</h2>
-        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      <div class="progress-stack">
+        <div class="progress-item" id="step1">1. Upload received</div>
+        <div class="progress-item" id="step2">2. Running scan</div>
+        <div class="progress-item" id="step3">3. Preparing review screen</div>
       </div>
-      <div class="hr"></div>
-
-      <div style="margin: 20px 0 10px; display:flex; align-items:center; gap:12px;">
-        <div class="spinner" aria-hidden="true"></div>
-        <div>Extracting container number and date...</div>
-      </div>
-
-      <div class="hr" style="margin-top:28px;"></div>
-      <div class="row">
-        <a class="btn" href="./upload.html">Back to Upload</a>
-        <a class="btn" href="./review.html">Go to Review</a>
+      <p id="processingMsg" class="muted">Starting scan...</p>
+      <div id="processingError" class="error hidden"></div>
+      <div class="actions">
+        <a class="btn secondary" href="./upload.html">Back to Upload</a>
       </div>
     </section>
   </main>
-  <script src="./config.js?v=20260414o"></script>
-  <script src="./app.js?v=20260414o"></script>
+
+  <script src="./app.js"></script>
 </body>
 </html>

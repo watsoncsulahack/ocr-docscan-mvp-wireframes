@@ -7,48 +7,40 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body data-page="review">
-  <main class="page">
+  <main class="container">
+    <header class="hero">
+      <h1>Review items below</h1>
+      <p>Check highlighted fields before submitting.</p>
+    </header>
+
     <section class="card">
-      <div class="topbar">
-        <h2 class="h2">Review Extracted Data</h2>
-        <span id="backendStatus" class="status-chip">Backend: checking...</span>
-      </div>
-      <div class="hr"></div>
+      <div id="reviewError" class="error hidden">Review these items before submitting.</div>
 
-      <div class="field">
-        <label class="label">Uploaded Image (for comparison)</label>
-        <div class="preview-box" style="min-height: 120px;">
-          <img id="uploadedPreviewImg" alt="Uploaded preview" style="display:none; max-width:100%; max-height:280px; border-radius:8px; border:1px solid var(--line);" />
-          <span id="uploadedPreviewHint" class="note">No preview available.</span>
-        </div>
-      </div>
+      <form id="reviewForm" class="review-form" autocomplete="off">
+        <label class="field-row" id="row-containerNo">
+          <span class="field-label"><span id="dot-containerNo" class="confidence-dot"></span>Container Number</span>
+          <input id="containerNo" class="input" type="text" placeholder="ABCD1234567" />
+        </label>
 
-      <div class="field">
-        <label class="label" for="containerNo">Container Number:</label>
-        <input class="input" id="containerNo" placeholder="" />
-      </div>
+        <label class="field-row" id="row-eventDate">
+          <span class="field-label"><span id="dot-eventDate" class="confidence-dot"></span>Event Date</span>
+          <input id="eventDate" class="input" type="text" placeholder="MM/DD/YYYY" />
+        </label>
+      </form>
 
-      <div class="field">
-        <label class="label" for="eventDate">Event Date (MM/DD/YYYY):</label>
-        <input class="input" id="eventDate" placeholder="" />
+      <div class="legend">
+        <span><i class="confidence-dot green"></i> Good</span>
+        <span><i class="confidence-dot yellow"></i> Review</span>
+        <span><i class="confidence-dot red"></i> Fix required</span>
       </div>
 
-      <p class="note">Review and correct values before final save.</p>
-      <p id="reviewMsg" class="note"></p>
-      <pre id="scanDebug" class="note" style="white-space:pre-wrap; border:1px dashed #2a3440; padding:10px; border-radius:8px; max-height:180px; overflow:auto;"></pre>
-
-      <div class="hr" style="margin-top:22px;"></div>
-      <div class="row">
-        <button id="confirmBtn" class="btn" type="button">Confirm Submission</button>
-      </div>
-
-      <div class="hr" style="margin-top:18px;"></div>
-      <div class="row">
-        <a class="btn" href="./upload.html">Back to Upload</a>
+      <div class="actions-inline">
+        <button id="rerunScan" class="btn secondary" type="button">Re-Run Scan</button>
+        <button id="submitBtn" class="btn" type="button">Confirm & Submit</button>
       </div>
     </section>
   </main>
-  <script src="./config.js?v=20260414o"></script>
-  <script src="./app.js?v=20260414o"></script>
+
+  <script src="./app.js"></script>
 </body>
 </html>

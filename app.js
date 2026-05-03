@@ -1,294 +1,333 @@
 (function () {
   const LS_KEY = "ocr.backend.url";
-  const SCAN_IMAGE_KEY = "ocr.scan.image";
-  const LOCAL_RECORDS_KEY = "ocr.local.records";
+  const PENDING_FILE_KEY = "ocr.pending.file";
+  const REVIEW_STATE_KEY = "ocr.review.state";
+  const LAST_SUBMISSION_KEY = "ocr.last.submission";
 
-  function backendUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = String(params.get("backend") || "").trim().replace(/\/$/, "");
-    if (fromQuery) {
-      localStorage.setItem(LS_KEY, fromQuery);
-      return fromQuery;
-    }
-    return (localStorage.getItem(LS_KEY) || window.OCR_BACKEND_URL || "http://127.0.0.1:8010").replace(/\/$/, "");
+  function byId(id) {
+    return document.getElementById(id);
   }
 
-  async function api(path, options = {}) {
-    const timeoutMs = Number(options.timeoutMs || 15000);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const reqOptions = { ...options, signal: controller.signal };
-      delete reqOptions.timeoutMs;
-      const res = await fetch(`${backendUrl()}${path}`, reqOptions);
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.detail || json?.message || `HTTP ${res.status}`);
-      return json;
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        throw new Error(`Request timeout after ${Math.round(timeoutMs / 1000)}s`);
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
+  function getBackendUrl() {
+    return (localStorage.getItem(LS_KEY) || "http://127.0.0.1:8000").replace(/\/+$/, "");
   }
 
-  function setStatus(text, ok) {
-    const el = document.getElementById("backendStatus");
-    if (!el) return;
-    el.textContent = text;
-    el.className = ok ? "status-chip ok" : "status-chip bad";
+  function setBackendUrl(url) {
+    localStorage.setItem(LS_KEY, (url || "").trim());
   }
 
-  async function healthCheck() {
-    try {
-      await api("/health", { timeoutMs: 6000 });
-      setStatus("Backend: online", true);
-      return true;
-    } catch {
-      setStatus("Backend: offline", false);
-      return false;
-    }
-  }
-
-  function wireBackendUrlControls() {
-    const input = document.getElementById("backendUrlInput");
-    const save = document.getElementById("saveBackendUrlBtn");
-    if (!input || !save) return;
-    input.value = backendUrl();
-    save.addEventListener("click", async () => {
-      const v = String(input.value || "").trim().replace(/\/$/, "");
-      if (!v) return;
-      localStorage.setItem(LS_KEY, v);
-      await healthCheck();
-    });
-  }
-
-  function fileToDataUrl(file) {
+  async function toDataUrl(file) {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(reader.error || new Error("file_read_failed"));
-      reader.readAsDataURL(file);
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || ""));
+      r.onerror = reject;
+      r.readAsDataURL(file);
     });
   }
 
-  function wireUploadPage() {
-    const fileInput = document.getElementById("fileInput");
-    const scanBtn = document.getElementById("scanBtn");
-    const msg = document.getElementById("scanMsg");
-    if (!fileInput || !scanBtn) return;
+  function dataUrlToBase64(dataUrl) {
+    if (!dataUrl || !dataUrl.includes(",")) return "";
+    return dataUrl.split(",")[1] || "";
+  }
 
-    let progressTimer = null;
+  function extFromFileName(name) {
+    const m = (name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+    return m ? m[1] : "";
+  }
 
-    function startProgressTicker() {
-      const startedAt = Date.now();
-      const tick = () => {
-        const sec = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
-        let stage = "Uploading file to backend";
-        if (sec >= 3) stage = "Running OCR extraction";
-        if (sec >= 10) stage = "Running LLM cleanup (ISO 6346 check)";
-        if (sec >= 25) stage = "Finalizing extracted fields";
-        if (msg) msg.textContent = `Processing... ${stage} (${sec}s)`;
-      };
-      tick();
-      progressTimer = setInterval(tick, 1000);
-    }
+  function classifyField(value, confidence, validate) {
+    const v = (value || "").trim();
+    if (!v) return "red";
+    if (!validate(v)) return "red";
+    if (confidence < 0.9) return "yellow";
+    return "green";
+  }
 
-    function stopProgressTicker() {
-      if (progressTimer) {
-        clearInterval(progressTimer);
-        progressTimer = null;
-      }
-    }
+  function validContainer(v) {
+    return /^[A-Za-z]{4}\d{7}$/.test((v || "").trim());
+  }
 
-    scanBtn.addEventListener("click", async () => {
-      const file = fileInput.files?.[0];
-      if (!file) {
-        if (msg) msg.textContent = "Pick an image first.";
+  function validDate(v) {
+    return /^\d{2}\/\d{2}\/\d{4}$/.test((v || "").trim());
+  }
+
+  function setDot(dotEl, status) {
+    if (!dotEl) return;
+    dotEl.classList.remove("green", "yellow", "red");
+    dotEl.classList.add(status);
+  }
+
+  function setRowHighlight(rowEl, status) {
+    if (!rowEl) return;
+    rowEl.classList.toggle("needs-review", status !== "green");
+  }
+
+  async function initUploadPage() {
+    const backendInput = byId("backendUrl");
+    const fileInput = byId("fileInput");
+    const cameraBtn = byId("openCamera");
+    const processBtn = byId("processBtn");
+    const fileMeta = byId("fileMeta");
+    const filePreview = byId("filePreview");
+    const uploadError = byId("uploadError");
+
+    if (!backendInput || !fileInput || !processBtn) return;
+
+    let selectedFile = null;
+    backendInput.value = getBackendUrl();
+
+    backendInput.addEventListener("change", () => setBackendUrl(backendInput.value));
+
+    fileInput.addEventListener("change", () => {
+      uploadError.classList.add("hidden");
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      if (!selectedFile) {
+        fileMeta.textContent = "No file selected.";
+        processBtn.disabled = true;
+        filePreview.classList.add("hidden");
+        filePreview.removeAttribute("src");
         return;
       }
 
-      scanBtn.disabled = true;
-      fileInput.disabled = true;
-      startProgressTicker();
-
-      const form = new FormData();
-      form.append("file", file);
-
-      try {
-        // Keep a local preview for review screen comparison.
-        const dataUrl = await fileToDataUrl(file);
-        if (dataUrl) sessionStorage.setItem(SCAN_IMAGE_KEY, dataUrl);
-      } catch {
-        sessionStorage.removeItem(SCAN_IMAGE_KEY);
+      const ext = extFromFileName(selectedFile.name);
+      if (!["pdf", "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"].includes(ext)) {
+        uploadError.textContent = "Unsupported file type. Use PDF or image files.";
+        uploadError.classList.remove("hidden");
+        processBtn.disabled = true;
+        return;
       }
 
+      fileMeta.textContent = `${selectedFile.name} (${Math.round(selectedFile.size / 1024)} KB)`;
+      processBtn.disabled = false;
+
+      if ((selectedFile.type || "").startsWith("image/")) {
+        const objUrl = URL.createObjectURL(selectedFile);
+        filePreview.src = objUrl;
+        filePreview.classList.remove("hidden");
+      } else {
+        filePreview.classList.add("hidden");
+        filePreview.removeAttribute("src");
+      }
+    });
+
+    cameraBtn.addEventListener("click", () => {
+      fileInput.setAttribute("accept", "image/*");
+      fileInput.setAttribute("capture", "environment");
+      fileInput.click();
+      setTimeout(() => {
+        fileInput.setAttribute("accept", ".pdf,image/*");
+        fileInput.removeAttribute("capture");
+      }, 300);
+    });
+
+    processBtn.addEventListener("click", async () => {
+      if (!selectedFile) return;
+      processBtn.disabled = true;
+      processBtn.textContent = "Preparing...";
+
       try {
-        const data = await api("/scan", { method: "POST", body: form, timeoutMs: 300000 });
-        stopProgressTicker();
-        if (msg) msg.textContent = "Processing complete. Opening review...";
-        sessionStorage.setItem("ocr.scan", JSON.stringify(data));
-        window.location.href = "./review.html";
+        const dataUrl = await toDataUrl(selectedFile);
+        sessionStorage.setItem(
+          PENDING_FILE_KEY,
+          JSON.stringify({
+            name: selectedFile.name,
+            type: selectedFile.type || "application/octet-stream",
+            size: selectedFile.size,
+            dataUrl,
+          })
+        );
+        window.location.href = "./processing.html";
       } catch (err) {
-        stopProgressTicker();
-        if (msg) msg.textContent = `Scan failed: ${err.message}`;
-      } finally {
-        scanBtn.disabled = false;
-        fileInput.disabled = false;
+        uploadError.textContent = `Could not prepare file: ${err?.message || err}`;
+        uploadError.classList.remove("hidden");
+        processBtn.disabled = false;
+        processBtn.textContent = "Process";
       }
     });
   }
 
-  function getLocalRecords() {
+  async function initProcessingPage() {
+    const step1 = byId("step1");
+    const step2 = byId("step2");
+    const step3 = byId("step3");
+    const msg = byId("processingMsg");
+    const errBox = byId("processingError");
+
+    const raw = sessionStorage.getItem(PENDING_FILE_KEY);
+    if (!raw) {
+      window.location.href = "./upload.html";
+      return;
+    }
+
+    const file = JSON.parse(raw);
+    step1?.classList.add("active");
+
     try {
-      const raw = localStorage.getItem(LOCAL_RECORDS_KEY) || "[]";
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function setLocalRecords(records) {
-    localStorage.setItem(LOCAL_RECORDS_KEY, JSON.stringify(Array.isArray(records) ? records : []));
-  }
-
-  function saveLocalRecord(payload) {
-    const records = getLocalRecords();
-    const rec = {
-      id: Date.now(),
-      containerNo: String(payload.containerNo || "").trim(),
-      date: String(payload.date || "").trim(),
-      corrected: Boolean(payload.corrected),
-      sourceFileName: payload.sourceFileName || null,
-      createdAt: new Date().toISOString(),
-    };
-    records.unshift(rec);
-    setLocalRecords(records);
-    return rec;
-  }
-
-  function wireReviewPage() {
-    const containerInput = document.getElementById("containerNo");
-    const dateInput = document.getElementById("eventDate");
-    const confirmBtn = document.getElementById("confirmBtn");
-    const msg = document.getElementById("reviewMsg");
-    const dbg = document.getElementById("scanDebug");
-    const uploadedImg = document.getElementById("uploadedPreviewImg");
-    const uploadedHint = document.getElementById("uploadedPreviewHint");
-    if (!containerInput || !dateInput || !confirmBtn) return;
-
-    let scan = {};
-    try {
-      scan = JSON.parse(sessionStorage.getItem("ocr.scan") || "{}");
-    } catch {
-      scan = {};
-    }
-
-    const imgDataUrl = sessionStorage.getItem(SCAN_IMAGE_KEY) || "";
-    if (uploadedImg && imgDataUrl) {
-      uploadedImg.src = imgDataUrl;
-      uploadedImg.style.display = "block";
-      if (uploadedHint) uploadedHint.style.display = "none";
-    }
-
-    const scanIssues = Array.isArray(scan?.issues) ? scan.issues : [];
-    const candidateDetails = Array.isArray(scan?.candidateDetails?.containerNos)
-      ? scan.candidateDetails.containerNos
-      : [];
-    const validCandidates = candidateDetails.filter((c) => c && c.iso6346Valid && c.value).map((c) => String(c.value));
-
-    let prefillContainer = String(scan?.extracted?.containerNo || "").trim();
-    if (!prefillContainer && validCandidates.length) {
-      prefillContainer = validCandidates[0];
-    }
-    if (
-      scanIssues.includes("no_container_found") ||
-      scanIssues.includes("no_iso_container_text_found") ||
-      scanIssues.includes("iso_container_text_not_found")
-    ) {
-      prefillContainer = "";
-    }
-
-    containerInput.value = prefillContainer;
-    dateInput.value = scan?.extracted?.date || "";
-
-    if (dbg) {
-      const lines = [];
-      lines.push(`Pipeline: ${(scan?.pipeline || []).join(' -> ') || 'n/a'}`);
-      lines.push(`Issues: ${(scan?.issues || []).join(', ') || 'none'}`);
-      lines.push(`OCR mode: ${scan?.ocrMode || 'n/a'}`);
-      if (scan?.rawTextPreview) {
-        lines.push('Raw text preview:');
-        lines.push(scan.rawTextPreview);
-      }
-      dbg.textContent = lines.join("\n");
-    }
-
-    confirmBtn.addEventListener("click", async () => {
+      msg.textContent = "Running scan...";
+      step2?.classList.add("active");
+      const backend = getBackendUrl();
       const payload = {
-        containerNo: String(containerInput.value || "").trim(),
-        date: String(dateInput.value || "").trim(),
-        sourceFileName: scan?.sourceFileName || null,
-        corrected:
-          String(containerInput.value || "").trim() !== String(scan?.extracted?.containerNo || "").trim() ||
-          String(dateInput.value || "").trim() !== String(scan?.extracted?.date || "").trim(),
+        sourceFileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        imageBase64: dataUrlToBase64(file.dataUrl),
       };
 
-      try {
-        const rec = saveLocalRecord(payload);
-        sessionStorage.setItem("ocr.saved", JSON.stringify(rec));
-        window.location.href = "./confirmation.html";
-      } catch (err) {
-        if (msg) msg.textContent = `Save failed: ${err.message}`;
-      }
-    });
-  }
-
-  function wireConfirmationPage() {
-    const rec = JSON.parse(sessionStorage.getItem("ocr.saved") || "{}");
-    const c = document.getElementById("cValue");
-    const d = document.getElementById("dValue");
-    if (c) c.textContent = rec.containerNo || "-";
-    if (d) d.textContent = rec.date || "-";
-  }
-
-  async function wireRecordsPage() {
-    const body = document.getElementById("recordsBody");
-    if (!body) return;
-
-    const rows = getLocalRecords();
-    body.innerHTML = rows
-      .map(
-        (r) => `<tr><td>${r.containerNo || ""}</td><td>${r.date || ""}</td><td>${r.corrected ? "Yes" : "No"}</td></tr>`
-      )
-      .join("");
-    if (!rows.length) body.innerHTML = `<tr><td colspan="3">No records yet (local storage).</td></tr>`;
-
-    const resetBtn = document.getElementById("resetDemoBtn");
-    if (resetBtn) {
-      resetBtn.addEventListener("click", async () => {
-        try {
-          setLocalRecords([]);
-          await wireRecordsPage();
-        } catch (err) {
-          alert(`Reset failed: ${err.message}`);
-        }
+      const res = await fetch(`${backend}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
+
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`Scan failed (${res.status}): ${t}`);
+      }
+
+      const scan = await res.json();
+      const containerNo = scan?.extracted?.containerNo || "";
+      const eventDate = scan?.extracted?.date || "";
+      const confidence = {
+        containerNo: containerNo ? 0.96 : 0.4,
+        eventDate: eventDate ? 0.82 : 0.35,
+      };
+
+      step3?.classList.add("active");
+      msg.textContent = "Preparing review screen...";
+
+      sessionStorage.setItem(
+        REVIEW_STATE_KEY,
+        JSON.stringify({
+          file,
+          classifier: "container",
+          fields: { containerNo, eventDate },
+          confidence,
+          scan,
+        })
+      );
+
+      window.location.href = "./review.html";
+    } catch (err) {
+      errBox.textContent = err?.message || String(err);
+      errBox.classList.remove("hidden");
+      msg.textContent = "Processing failed. Please return and try again.";
     }
   }
 
-  document.addEventListener("DOMContentLoaded", async () => {
-    wireBackendUrlControls();
-    await healthCheck();
+  async function initReviewPage() {
+    const raw = sessionStorage.getItem(REVIEW_STATE_KEY);
+    if (!raw) {
+      window.location.href = "./upload.html";
+      return;
+    }
 
-    const page = document.body.dataset.page;
-    if (page === "upload") wireUploadPage();
-    if (page === "review") wireReviewPage();
-    if (page === "confirmation") wireConfirmationPage();
-    if (page === "records") wireRecordsPage();
-  });
+    const state = JSON.parse(raw);
+    const containerInput = byId("containerNo");
+    const eventInput = byId("eventDate");
+    const dotContainer = byId("dot-containerNo");
+    const dotDate = byId("dot-eventDate");
+    const rowContainer = byId("row-containerNo");
+    const rowDate = byId("row-eventDate");
+    const submitBtn = byId("submitBtn");
+    const rerunBtn = byId("rerunScan");
+    const errBox = byId("reviewError");
+
+    containerInput.value = state.fields?.containerNo || "";
+    eventInput.value = state.fields?.eventDate || "";
+
+    function evaluate() {
+      const s1 = classifyField(containerInput.value, Number(state.confidence?.containerNo || 0), validContainer);
+      const s2 = classifyField(eventInput.value, Number(state.confidence?.eventDate || 0), validDate);
+      setDot(dotContainer, s1);
+      setDot(dotDate, s2);
+      setRowHighlight(rowContainer, s1);
+      setRowHighlight(rowDate, s2);
+      return { s1, s2 };
+    }
+
+    containerInput.addEventListener("input", () => {
+      errBox.classList.add("hidden");
+      evaluate();
+    });
+    eventInput.addEventListener("input", () => {
+      errBox.classList.add("hidden");
+      evaluate();
+    });
+
+    rerunBtn.addEventListener("click", () => {
+      window.location.href = "./processing.html";
+    });
+
+    submitBtn.addEventListener("click", async () => {
+      const evalResult = evaluate();
+      if (evalResult.s1 !== "green" || evalResult.s2 !== "green") {
+        errBox.textContent = "Review these items before submitting.";
+        errBox.classList.remove("hidden");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Submitting...";
+      try {
+        const backend = getBackendUrl();
+        const fileType = extFromFileName(state.file?.name || "") || "pdf";
+        const payload = {
+          sourceFileName: state.file?.name || "upload.pdf",
+          fileType,
+          classifier: "container",
+          originalFileName: state.file?.name || null,
+          fileContentBase64: dataUrlToBase64(state.file?.dataUrl || ""),
+          extracted: {
+            container_number: containerInput.value.trim(),
+            event_date: eventInput.value.trim(),
+          },
+          confidence: {
+            container_number: 1.0,
+            event_date: 1.0,
+          },
+        };
+
+        const res = await fetch(`${backend}/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`Submit failed (${res.status}): ${t}`);
+        }
+
+        const out = await res.json();
+        sessionStorage.setItem(LAST_SUBMISSION_KEY, JSON.stringify(out));
+        window.location.href = "./confirmation.html";
+      } catch (err) {
+        errBox.textContent = err?.message || String(err);
+        errBox.classList.remove("hidden");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Confirm & Submit";
+      }
+    });
+
+    evaluate();
+  }
+
+  function initConfirmationPage() {
+    const submissionIdEl = byId("submissionId");
+    const statusEl = byId("submissionStatus");
+    const raw = sessionStorage.getItem(LAST_SUBMISSION_KEY);
+    if (!raw) return;
+    try {
+      const out = JSON.parse(raw);
+      submissionIdEl.textContent = out.submissionId || "-";
+      statusEl.textContent = out.status || "-";
+    } catch {
+      // ignore parse issues
+    }
+  }
+
+  const page = document.body?.dataset?.page;
+  if (page === "upload") initUploadPage();
+  if (page === "processing") initProcessingPage();
+  if (page === "review") initReviewPage();
+  if (page === "confirmation") initConfirmationPage();
 })();

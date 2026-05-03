@@ -7,28 +7,22 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body data-page="confirmation">
-  <main class="page">
+  <main class="container">
+    <header class="hero">
+      <h1>Submission Complete</h1>
+      <p>Your document was sent successfully.</p>
+    </header>
+
     <section class="card">
-      <div class="topbar">
-        <h2 class="h2">Submission Successful</h2>
-        <span id="backendStatus" class="status-chip">Backend: checking...</span>
-      </div>
-      <div class="hr"></div>
-
-      <div class="kv" style="margin-top:18px; font-size:1.25rem;">
-        <p>Container:<br /><strong id="cValue">-</strong></p>
-        <p>Date:<br /><strong id="dValue">-</strong></p>
-        <p>Status:<br /><span class="status-ok"><strong>Stored</strong></span></p>
-      </div>
-
-      <div class="hr"></div>
-      <div class="row">
-        <a class="btn" href="./upload.html">Submit Another</a>
-        <a class="btn" href="./records.html">View Records</a>
+      <p><strong>Submission ID:</strong> <span id="submissionId">-</span></p>
+      <p><strong>Status:</strong> <span id="submissionStatus">-</span></p>
+      <div class="actions-inline">
+        <a class="btn" href="./upload.html">Upload Another</a>
+        <a class="btn secondary" href="./records.html">View Records</a>
       </div>
     </section>
   </main>
-  <script src="./config.js?v=20260414o"></script>
-  <script src="./app.js?v=20260414o"></script>
+
+  <script src="./app.js"></script>
 </body>
 </html>

@@ -7,38 +7,35 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body data-page="upload">
-  <main class="page">
+  <main class="container">
+    <header class="hero">
+      <h1>Upload Document</h1>
+      <p>Select a PDF or image to begin scanning.</p>
+    </header>
+
     <section class="card">
-      <div class="topbar">
-        <h2 class="h2">OCR Document Upload</h2>
-        <span id="backendStatus" class="status-chip">Backend: checking...</span>
-      </div>
-      <div class="hr"></div>
+      <label class="label" for="backendUrl">Backend URL</label>
+      <input id="backendUrl" class="input" type="url" placeholder="http://127.0.0.1:8000" />
 
-      <div class="row" style="margin-top:10px;">
-        <input id="fileInput" class="input" type="file" accept="image/*" capture="environment" />
+      <div class="drop-zone">
+        <input id="fileInput" type="file" accept=".pdf,image/*" />
       </div>
 
-      <div class="preview-box">
-        <div>
-          <div style="font-size:1.4rem; margin-bottom:8px;">Camera / Upload Input</div>
-          <div>Choose image then tap Scan Document</div>
-        </div>
+      <div class="actions-inline">
+        <button id="openCamera" class="btn secondary" type="button">Use Camera</button>
       </div>
 
-      <div class="row">
-        <button id="scanBtn" class="btn" type="button">Scan Document</button>
-      </div>
-      <p id="scanMsg" class="note"></p>
+      <p id="fileMeta" class="muted">No file selected.</p>
+      <img id="filePreview" class="preview hidden" alt="Selected file preview" />
 
-      <div class="hr" style="margin-top:18px;"></div>
-      <div class="row">
-        <a class="btn" href="./index.html">Back to Menu</a>
-        <a class="btn" href="./records.html">View Records</a>
+      <div id="uploadError" class="error hidden"></div>
+
+      <div class="actions">
+        <button id="processBtn" class="btn" type="button" disabled>Process</button>
       </div>
     </section>
   </main>
-  <script src="./config.js?v=20260414o"></script>
-  <script src="./app.js?v=20260414o"></script>
+
+  <script src="./app.js"></script>
 </body>
 </html>
