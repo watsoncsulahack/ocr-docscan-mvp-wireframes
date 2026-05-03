@@ -1,19 +1,40 @@
 (function () {
-  const LS_KEY = "ocr.backend.url";
   const PENDING_FILE_KEY = "ocr.pending.file";
   const REVIEW_STATE_KEY = "ocr.review.state";
   const LAST_SUBMISSION_KEY = "ocr.last.submission";
+  let BACKEND_BASE_CACHE = null;
 
   function byId(id) {
     return document.getElementById(id);
   }
 
-  function getBackendUrl() {
-    return (localStorage.getItem(LS_KEY) || "http://127.0.0.1:8000").replace(/\/+$/, "");
-  }
+  async function resolveBackendUrl() {
+    if (BACKEND_BASE_CACHE) return BACKEND_BASE_CACHE;
 
-  function setBackendUrl(url) {
-    localStorage.setItem(LS_KEY, (url || "").trim());
+    const candidates = [];
+    if (window.location.protocol.startsWith("http")) {
+      candidates.push(window.location.origin.replace(/\/+$/, ""));
+    }
+    candidates.push("http://127.0.0.1:8000", "http://localhost:8000");
+
+    const seen = new Set();
+    for (const base of candidates) {
+      if (seen.has(base)) continue;
+      seen.add(base);
+      try {
+        const res = await fetch(`${base}/health`);
+        if (res.ok) {
+          BACKEND_BASE_CACHE = base;
+          return base;
+        }
+      } catch {
+        // try next
+      }
+    }
+
+    throw new Error(
+      "Could not connect to local backend. Start backend with uvicorn on http://127.0.0.1:8000."
+    );
   }
 
   async function toDataUrl(file) {
@@ -63,7 +84,6 @@
   }
 
   async function initUploadPage() {
-    const backendInput = byId("backendUrl");
     const fileInput = byId("fileInput");
     const cameraBtn = byId("openCamera");
     const processBtn = byId("processBtn");
@@ -71,12 +91,9 @@
     const filePreview = byId("filePreview");
     const uploadError = byId("uploadError");
 
-    if (!backendInput || !fileInput || !processBtn) return;
+    if (!fileInput || !processBtn) return;
 
     let selectedFile = null;
-    backendInput.value = getBackendUrl();
-
-    backendInput.addEventListener("change", () => setBackendUrl(backendInput.value));
 
     fileInput.addEventListener("change", () => {
       uploadError.classList.add("hidden");
@@ -126,6 +143,7 @@
       processBtn.textContent = "Preparing...";
 
       try {
+        await resolveBackendUrl();
         const dataUrl = await toDataUrl(selectedFile);
         sessionStorage.setItem(
           PENDING_FILE_KEY,
@@ -165,7 +183,7 @@
     try {
       msg.textContent = "Running scan...";
       step2?.classList.add("active");
-      const backend = getBackendUrl();
+      const backend = await resolveBackendUrl();
       const payload = {
         sourceFileName: file.name,
         mimeType: file.type || "application/octet-stream",
@@ -268,7 +286,7 @@
       submitBtn.disabled = true;
       submitBtn.textContent = "Submitting...";
       try {
-        const backend = getBackendUrl();
+        const backend = await resolveBackendUrl();
         const fileType = extFromFileName(state.file?.name || "") || "pdf";
         const payload = {
           sourceFileName: state.file?.name || "upload.pdf",

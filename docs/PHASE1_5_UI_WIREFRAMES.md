@@ -4,7 +4,7 @@ This phase provides a working user-facing UI flow for testing:
 
 1. `upload.html`
    - choose PDF/image or camera capture
-   - set backend URL
+   - backend is auto-detected for local/offline mode
    - process selected file
 
 2. `processing.html`
