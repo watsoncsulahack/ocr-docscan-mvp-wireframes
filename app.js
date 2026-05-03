@@ -4,6 +4,15 @@
   const LAST_SUBMISSION_KEY = "ocr.last.submission";
   let BACKEND_BASE_CACHE = null;
 
+  function setBackendStatus(online) {
+    const wrap = byId("backendStatus");
+    const label = byId("backendStatusLabel");
+    if (!wrap || !label) return;
+    wrap.classList.toggle("online", !!online);
+    wrap.classList.toggle("offline", !online);
+    label.textContent = online ? "online" : "offline";
+  }
+
   function byId(id) {
     return document.getElementById(id);
   }
@@ -25,6 +34,7 @@
         const res = await fetch(`${base}/health`);
         if (res.ok) {
           BACKEND_BASE_CACHE = base;
+          setBackendStatus(true);
           return base;
         }
       } catch {
@@ -32,9 +42,25 @@
       }
     }
 
+    setBackendStatus(false);
+
     throw new Error(
       "Could not connect to local backend. Start backend with uvicorn on http://127.0.0.1:8000."
     );
+  }
+
+  async function probeBackendStatus() {
+    try {
+      if (BACKEND_BASE_CACHE) {
+        const res = await fetch(`${BACKEND_BASE_CACHE}/health`);
+        setBackendStatus(res.ok);
+        if (!res.ok) BACKEND_BASE_CACHE = null;
+        return;
+      }
+      await resolveBackendUrl();
+    } catch {
+      setBackendStatus(false);
+    }
   }
 
   async function toDataUrl(file) {
@@ -94,6 +120,10 @@
     if (!fileInput || !processBtn) return;
 
     let selectedFile = null;
+
+    // Initial and periodic health probes for online/offline badge
+    probeBackendStatus();
+    setInterval(probeBackendStatus, 5000);
 
     fileInput.addEventListener("change", () => {
       uploadError.classList.add("hidden");

@@ -9,7 +9,13 @@
 <body data-page="upload">
   <main class="container">
     <header class="hero">
-      <h1>Upload Document</h1>
+      <div class="title-row">
+        <h1>OCR MVP Demo</h1>
+        <div id="backendStatus" class="backend-status offline" aria-live="polite">
+          <span id="backendStatusLabel">offline</span>
+          <span id="backendStatusDot" class="backend-status-dot"></span>
+        </div>
+      </div>
       <p>Select a PDF or image to begin scanning.</p>
     </header>
 

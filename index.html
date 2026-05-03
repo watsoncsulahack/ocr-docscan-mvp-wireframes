@@ -11,10 +11,9 @@
     <header class="hero">
       <div class="title-row">
         <h1>OCR MVP Demo</h1>
-        <div class="status-indicator" aria-label="confidence colors">
-          <span class="confidence-dot green" title="Green"></span>
-          <span class="confidence-dot yellow" title="Yellow"></span>
-          <span class="confidence-dot red" title="Red"></span>
+        <div id="backendStatus" class="backend-status offline" aria-live="polite">
+          <span id="backendStatusLabel">offline</span>
+          <span id="backendStatusDot" class="backend-status-dot"></span>
         </div>
       </div>
       <p>Select a file to upload and process.</p>
