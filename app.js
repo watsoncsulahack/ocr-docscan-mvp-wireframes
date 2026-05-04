@@ -424,7 +424,21 @@
         const out = await res.json();
         const rows = Array.isArray(out?.records) ? out.records : [];
         if (!rows.length) {
-          body.innerHTML = '<tr><td colspan="3">No records yet.</td></tr>';
+          try {
+            const subRes = await fetch(`${backend}/submissions`);
+            const subOut = subRes.ok ? await subRes.json() : { submissions: [] };
+            const submissions = Array.isArray(subOut?.submissions) ? subOut.submissions : [];
+            const duplicateCount = submissions.filter((s) => s.status === "DUPLICATE").length;
+            const approvedCount = submissions.filter((s) => s.status === "APPROVED").length;
+
+            if (submissions.length) {
+              body.innerHTML = `<tr><td colspan="3">No approved records yet. Submissions found: ${submissions.length} (approved: ${approvedCount}, duplicate: ${duplicateCount}).</td></tr>`;
+            } else {
+              body.innerHTML = '<tr><td colspan="3">No records yet.</td></tr>';
+            }
+          } catch {
+            body.innerHTML = '<tr><td colspan="3">No records yet.</td></tr>';
+          }
           return;
         }
 
