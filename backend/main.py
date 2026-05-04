@@ -1898,6 +1898,20 @@ def submit_document(payload: SubmissionIn):
             (str(uuid.uuid4()), submission_id, classifier, json.dumps(normalized), "system", now),
         )
 
+        if classifier == "container":
+            record_container = normalize_container(normalized.get("container_number") or "")
+            record_date = (normalized.get("event_date") or "").strip()
+            if valid_container(record_container) and valid_date(record_date):
+                exists_record = conn.execute(
+                    "SELECT id FROM records WHERE containerNo = ? AND date = ? AND sourceFileName = ? ORDER BY id DESC LIMIT 1",
+                    (record_container, record_date, source_file_name),
+                ).fetchone()
+                if not exists_record:
+                    conn.execute(
+                        "INSERT INTO records(containerNo, date, sourceFileName, corrected, createdAt) VALUES (?, ?, ?, ?, ?)",
+                        (record_container, record_date, source_file_name, 1, now),
+                    )
+
     add_audit(conn, submission_id, "SUBMIT", "user", {"sourceFileName": source_file_name, "fileType": file_type, "classifier": classifier})
     add_audit(conn, submission_id, "VALIDATE", "system", {"rules": rule_results, "status": status})
     add_audit(conn, submission_id, "STATUS_ROUTE", "system", {"status": status, "duplicateOf": duplicate_of})

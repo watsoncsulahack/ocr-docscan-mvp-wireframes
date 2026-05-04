@@ -7,10 +7,16 @@
   function setBackendStatus(online) {
     const wrap = byId("backendStatus");
     const label = byId("backendStatusLabel");
-    if (!wrap || !label) return;
+    if (!wrap) return;
+
     wrap.classList.toggle("online", !!online);
     wrap.classList.toggle("offline", !online);
-    label.textContent = online ? "online" : "offline";
+
+    if (label) {
+      label.textContent = online ? "online" : "offline";
+    } else {
+      wrap.textContent = `Backend: ${online ? "online" : "offline"}`;
+    }
   }
 
   function byId(id) {
@@ -400,9 +406,68 @@
     }
   }
 
+  async function initRecordsPage() {
+    const body = byId("recordsBody");
+    const resetBtn = byId("resetDemoBtn");
+    if (!body) return;
+
+    async function loadRows() {
+      body.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
+      try {
+        const backend = await resolveBackendUrl();
+        const res = await fetch(`${backend}/records`);
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || `HTTP ${res.status}`);
+        }
+
+        const out = await res.json();
+        const rows = Array.isArray(out?.records) ? out.records : [];
+        if (!rows.length) {
+          body.innerHTML = '<tr><td colspan="3">No records yet.</td></tr>';
+          return;
+        }
+
+        body.innerHTML = "";
+        rows.forEach((r) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${r.containerNo || "-"}</td>
+            <td>${r.date || "-"}</td>
+            <td>${r.corrected ? "Yes" : "No"}</td>
+          `;
+          body.appendChild(tr);
+        });
+      } catch (err) {
+        body.innerHTML = `<tr><td colspan="3">Failed to load records: ${err?.message || err}</td></tr>`;
+      }
+    }
+
+    resetBtn?.addEventListener("click", async () => {
+      try {
+        const backend = await resolveBackendUrl();
+        const res = await fetch(`${backend}/reset-demo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: "RESET_DEMO" }),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || `HTTP ${res.status}`);
+        }
+        await loadRows();
+      } catch (err) {
+        body.innerHTML = `<tr><td colspan="3">Reset failed: ${err?.message || err}</td></tr>`;
+      }
+    });
+
+    await loadRows();
+  }
+
   const page = document.body?.dataset?.page;
   if (page === "upload") initUploadPage();
   if (page === "processing") initProcessingPage();
   if (page === "review") initReviewPage();
   if (page === "confirmation") initConfirmationPage();
+  if (page === "records") initRecordsPage();
 })();
