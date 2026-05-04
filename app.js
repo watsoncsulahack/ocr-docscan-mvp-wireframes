@@ -24,7 +24,12 @@
     if (window.location.protocol.startsWith("http")) {
       candidates.push(window.location.origin.replace(/\/+$/, ""));
     }
-    candidates.push("http://127.0.0.1:8000", "http://localhost:8000");
+    candidates.push(
+      "http://127.0.0.1:8000",
+      "http://localhost:8000",
+      "http://127.0.0.1:8010",
+      "http://localhost:8010"
+    );
 
     const seen = new Set();
     for (const base of candidates) {
@@ -45,7 +50,7 @@
     setBackendStatus(false);
 
     throw new Error(
-      "Could not connect to local backend. Start backend with uvicorn on http://127.0.0.1:8000."
+      "Could not connect to local backend. Start backend with uvicorn on http://127.0.0.1:8000 (or :8010)."
     );
   }
 

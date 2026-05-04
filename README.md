@@ -41,7 +41,7 @@ pip install -r backend/requirements.txt
 # pip install -r backend/requirements-optional-doctr.txt
 # OCR binary required only for local Tesseract mode:
 # Ubuntu/Debian: sudo apt-get install -y tesseract-ocr
-uvicorn backend.main:app --reload --port 8010
+uvicorn backend.main:app --reload --port 8000
 ```
 
 ### 2) Frontend
@@ -52,7 +52,7 @@ python3 -m http.server 8080
 
 Open:
 - Frontend: `http://127.0.0.1:8080`
-- Backend health: `http://127.0.0.1:8010/health`
+- Backend health: `http://127.0.0.1:8000/health`
 
 ## GitHub Pages + Backend Wiring
 

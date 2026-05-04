@@ -70,6 +70,8 @@ APP_ORIGINS = [
     "http://localhost:8099",
     "http://127.0.0.1:8113",
     "http://localhost:8113",
+    "http://127.0.0.1:8118",
+    "http://localhost:8118",
 ]
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
