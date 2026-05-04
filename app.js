@@ -98,11 +98,11 @@
     return m ? m[1] : "";
   }
 
-  function classifyField(value, confidence, validate) {
+  function classifyField(value, confidence, validate, userAdjusted = false) {
     const v = (value || "").trim();
     if (!v) return "red";
     if (!validate(v)) return "red";
-    if (confidence < 0.9) return "yellow";
+    if (!userAdjusted && confidence < 0.9) return "yellow";
     return "green";
   }
 
@@ -292,13 +292,25 @@
     const submitBtn = byId("submitBtn");
     const rerunBtn = byId("rerunScan");
     const errBox = byId("reviewError");
+    const reviewFilePreview = byId("reviewFilePreview");
 
     containerInput.value = state.fields?.containerNo || "";
     eventInput.value = state.fields?.eventDate || "";
 
+    const initialContainer = String(state.fields?.containerNo || "").trim();
+    const initialEventDate = String(state.fields?.eventDate || "").trim();
+
+    if (reviewFilePreview && state.file?.dataUrl && String(state.file?.type || "").startsWith("image/")) {
+      reviewFilePreview.src = state.file.dataUrl;
+      reviewFilePreview.classList.remove("hidden");
+    }
+
     function evaluate() {
-      const s1 = classifyField(containerInput.value, Number(state.confidence?.containerNo || 0), validContainer);
-      const s2 = classifyField(eventInput.value, Number(state.confidence?.eventDate || 0), validDate);
+      const containerAdjusted = containerInput.value.trim() !== initialContainer;
+      const dateAdjusted = eventInput.value.trim() !== initialEventDate;
+
+      const s1 = classifyField(containerInput.value, Number(state.confidence?.containerNo || 0), validContainer, containerAdjusted);
+      const s2 = classifyField(eventInput.value, Number(state.confidence?.eventDate || 0), validDate, dateAdjusted);
       setDot(dotContainer, s1);
       setDot(dotDate, s2);
       setRowHighlight(rowContainer, s1);
