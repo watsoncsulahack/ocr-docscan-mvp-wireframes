@@ -1184,6 +1184,9 @@ async def scan(file: UploadFile = File(...)):
         if not extracted_container:
             issues.append("iso_container_text_not_found")
 
+        container_confidence = 0.96 if valid_container(extracted_container) else (0.45 if extracted_container else 0.1)
+        date_confidence = 0.9 if valid_date(extracted_date) else 0.2
+
         classifier = classify_initial_document(filename, "", [], [])
         dedupe_key = compute_dedupe_key(classifier, {"container_number": extracted_container, "event_date": extracted_date}, file_sha256)
 
@@ -1208,13 +1211,15 @@ async def scan(file: UploadFile = File(...)):
             "submissionId": submission_id,
             "status": status,
             "classifier": classifier,
+            "documentType": classifier,
             "fileHash": file_sha256,
             "duplicateOf": dup,
             "extracted": {"containerNo": extracted_container, "date": extracted_date},
+            "confidence": {"containerNo": container_confidence, "date": date_confidence},
             "candidates": {"containerNos": [], "dates": []},
             "candidateDetails": {"containerNos": []},
             "issues": issues,
-            "requiresReview": True,
+            "requiresReview": classifier == "other" or container_confidence < CONFIDENCE_THRESHOLD or date_confidence < CONFIDENCE_THRESHOLD,
             "sourceFileName": filename,
             "ocrMode": "llm_direct_image",
             "rawTextPreview": "",
@@ -1325,6 +1330,9 @@ async def scan(file: UploadFile = File(...)):
 
     candidate_details = [{"value": c, "iso6346Valid": iso6346_is_valid(c)} for c in containers]
 
+    container_confidence = 0.96 if valid_container(extracted_container) else (0.6 if extracted_container else 0.15)
+    date_confidence = 0.9 if dates and extracted_date in dates else (0.75 if valid_date(extracted_date) else 0.2)
+
     classifier = classify_initial_document(filename, raw_text, valid_containers, dates)
     dedupe_payload = {
         "container_number": extracted_container,
@@ -1342,17 +1350,18 @@ async def scan(file: UploadFile = File(...)):
     status = "DUPLICATE" if dup else "PROCESSING"
 
     extraction_id = str(uuid.uuid4())
+    confidence_summary = (container_confidence + date_confidence) / 2.0
     conn.execute(
         "INSERT INTO extraction_results(id, submission_id, classifier, raw_text, confidence_summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (extraction_id, submission_id, classifier, raw_text[:4000], None, now_iso()),
+        (extraction_id, submission_id, classifier, raw_text[:4000], confidence_summary, now_iso()),
     )
     conn.execute(
         "INSERT INTO extracted_fields(id, submission_id, extraction_result_id, field_name, field_value, confidence, is_required, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), submission_id, extraction_id, "container_number", extracted_container or None, None, 1 if classifier == "container" else 0, "intake_scan", now_iso()),
+        (str(uuid.uuid4()), submission_id, extraction_id, "container_number", extracted_container or None, container_confidence, 1 if classifier == "container" else 0, "intake_scan", now_iso()),
     )
     conn.execute(
         "INSERT INTO extracted_fields(id, submission_id, extraction_result_id, field_name, field_value, confidence, is_required, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), submission_id, extraction_id, "event_date", extracted_date or None, None, 1 if classifier == "container" else 0, "intake_scan", now_iso()),
+        (str(uuid.uuid4()), submission_id, extraction_id, "event_date", extracted_date or None, date_confidence, 1 if classifier == "container" else 0, "intake_scan", now_iso()),
     )
     conn.execute(
         "UPDATE submissions SET classifier = ?, status = ?, updated_at = ?, dedupe_key = ?, duplicate_of = ?, fallback_date_used = ?, fallback_date_value = ? WHERE id = ?",
@@ -1369,13 +1378,15 @@ async def scan(file: UploadFile = File(...)):
         "submissionId": submission_id,
         "status": status,
         "classifier": classifier,
+        "documentType": classifier,
         "fileHash": file_sha256,
         "duplicateOf": dup,
         "extracted": {"containerNo": extracted_container, "date": extracted_date},
+        "confidence": {"containerNo": container_confidence, "date": date_confidence},
         "candidates": {"containerNos": containers, "dates": dates},
         "candidateDetails": {"containerNos": candidate_details},
         "issues": issues,
-        "requiresReview": True,
+        "requiresReview": classifier == "other" or container_confidence < CONFIDENCE_THRESHOLD or date_confidence < CONFIDENCE_THRESHOLD,
         "sourceFileName": filename,
         "ocrMode": "hybrid_pipeline",
         "rawTextPreview": raw_text[:1200],

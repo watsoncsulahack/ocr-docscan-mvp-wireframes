@@ -254,8 +254,8 @@
       const containerNo = scan?.extracted?.containerNo || "";
       const eventDate = scan?.extracted?.date || "";
       const confidence = {
-        containerNo: containerNo ? 0.96 : 0.4,
-        eventDate: eventDate ? 0.82 : 0.35,
+        containerNo: Number(scan?.confidence?.containerNo ?? (containerNo ? 0.96 : 0.4)),
+        eventDate: Number(scan?.confidence?.date ?? (eventDate ? 0.82 : 0.35)),
       };
 
       step3?.classList.add("active");
