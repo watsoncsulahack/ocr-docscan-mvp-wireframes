@@ -188,6 +188,11 @@ body {
   gap: 6px;
 }
 
+.field-help {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .field-label {
   display: inline-flex;
   align-items: center;
