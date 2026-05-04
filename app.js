@@ -254,7 +254,8 @@
         REVIEW_STATE_KEY,
         JSON.stringify({
           file,
-          classifier: "container",
+          submissionId: scan?.submissionId || null,
+          classifier: scan?.classifier || "container",
           fields: { containerNo, eventDate },
           confidence,
           scan,
@@ -327,9 +328,10 @@
         const backend = await resolveBackendUrl();
         const fileType = extFromFileName(state.file?.name || "") || "pdf";
         const payload = {
+          submissionId: state.submissionId || undefined,
           sourceFileName: state.file?.name || "upload.pdf",
           fileType,
-          classifier: "container",
+          classifier: state.classifier || "container",
           originalFileName: state.file?.name || null,
           fileContentBase64: dataUrlToBase64(state.file?.dataUrl || ""),
           extracted: {

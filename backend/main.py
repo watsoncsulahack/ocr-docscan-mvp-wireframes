@@ -1080,7 +1080,65 @@ async def scan(file: UploadFile = File(...)):
     if len(raw) > MAX_FILE_BYTES:
         raise HTTPException(status_code=400, detail="File too large.")
 
-    temp_name = f"{uuid.uuid4().hex[:12]}_{filename}"
+    file_sha256 = hashlib.sha256(raw).hexdigest()
+    source_file_name = strip_extension(filename)
+    file_type = "pdf" if is_pdf else normalize_file_type(Path(filename).suffix.lstrip("."))
+    if file_type == "jpeg":
+        file_type = "jpg"
+
+    submission_id = str(uuid.uuid4())
+    now = now_iso()
+
+    conn = db_connect()
+    prior_same_hash = conn.execute(
+        "SELECT id FROM submissions WHERE file_sha256 = ? ORDER BY created_at DESC LIMIT 1",
+        (file_sha256,),
+    ).fetchone()
+    duplicate_of = prior_same_hash["id"] if prior_same_hash else None
+
+    conn.execute(
+        """
+        INSERT INTO submissions(
+            id, source_file_name, file_type, classifier, status,
+            uploaded_at, created_at, updated_at, file_sha256, dedupe_key,
+            duplicate_of, fallback_date_used, fallback_date_value, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            submission_id,
+            source_file_name,
+            file_type,
+            "other",
+            "PROCESSING",
+            now,
+            now,
+            now,
+            file_sha256,
+            f"sha:{file_sha256}",
+            duplicate_of,
+            0,
+            None,
+            "phase2_intake",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO document_files(id, submission_id, original_filename, source_file_name, file_type, file_sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            str(uuid.uuid4()),
+            submission_id,
+            filename,
+            source_file_name,
+            file_type,
+            file_sha256,
+            None,
+            now,
+        ),
+    )
+    add_audit(conn, submission_id, "INTAKE_CREATED", "system", {"fileType": file_type, "sourceFileName": source_file_name})
+    conn.commit()
+    conn.close()
+
+    temp_name = f"{file_sha256[:12]}_{filename}"
     temp_path = UPLOAD_DIR / temp_name
     temp_path.write_bytes(raw)
 
@@ -1124,9 +1182,32 @@ async def scan(file: UploadFile = File(...)):
         if not extracted_container:
             issues.append("iso_container_text_not_found")
 
+        classifier = classify_initial_document(filename, "", [], [])
+        dedupe_key = compute_dedupe_key(classifier, {"container_number": extracted_container, "event_date": extracted_date}, file_sha256)
+
+        conn = db_connect()
+        existing = conn.execute(
+            "SELECT id FROM submissions WHERE id != ? AND (file_sha256 = ? OR dedupe_key = ?) ORDER BY created_at DESC LIMIT 1",
+            (submission_id, file_sha256, dedupe_key),
+        ).fetchone()
+        dup = existing["id"] if existing else duplicate_of
+        status = "DUPLICATE" if dup else "PROCESSING"
+        conn.execute(
+            "UPDATE submissions SET classifier = ?, status = ?, updated_at = ?, dedupe_key = ?, duplicate_of = ? WHERE id = ?",
+            (classifier, status, now_iso(), dedupe_key, dup, submission_id),
+        )
+        add_audit(conn, submission_id, "INTAKE_CLASSIFIED", "system", {"classifier": classifier, "status": status})
+        conn.commit()
+        conn.close()
+
         return {
             "ok": True,
             "scanId": str(uuid.uuid4()),
+            "submissionId": submission_id,
+            "status": status,
+            "classifier": classifier,
+            "fileHash": file_sha256,
+            "duplicateOf": dup,
             "extracted": {"containerNo": extracted_container, "date": extracted_date},
             "candidates": {"containerNos": [], "dates": []},
             "candidateDetails": {"containerNos": []},
@@ -1224,7 +1305,6 @@ async def scan(file: UploadFile = File(...)):
     if dates:
         extracted_date = llm_date if llm_date in dates else dates[0]
     else:
-        # If OCR found no explicit date, default to current date for deterministic MVP behavior.
         extracted_date = dt.datetime.now().strftime("%m/%d/%Y")
 
     issues = []
@@ -1243,9 +1323,52 @@ async def scan(file: UploadFile = File(...)):
 
     candidate_details = [{"value": c, "iso6346Valid": iso6346_is_valid(c)} for c in containers]
 
+    classifier = classify_initial_document(filename, raw_text, valid_containers, dates)
+    dedupe_payload = {
+        "container_number": extracted_container,
+        "event_date": extracted_date,
+        "transaction_date": extracted_date,
+    }
+    dedupe_key = compute_dedupe_key(classifier, dedupe_payload, file_sha256)
+
+    conn = db_connect()
+    existing = conn.execute(
+        "SELECT id FROM submissions WHERE id != ? AND (file_sha256 = ? OR dedupe_key = ?) ORDER BY created_at DESC LIMIT 1",
+        (submission_id, file_sha256, dedupe_key),
+    ).fetchone()
+    dup = existing["id"] if existing else duplicate_of
+    status = "DUPLICATE" if dup else "PROCESSING"
+
+    extraction_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO extraction_results(id, submission_id, classifier, raw_text, confidence_summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (extraction_id, submission_id, classifier, raw_text[:4000], None, now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO extracted_fields(id, submission_id, extraction_result_id, field_name, field_value, confidence, is_required, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), submission_id, extraction_id, "container_number", extracted_container or None, None, 1 if classifier == "container" else 0, "intake_scan", now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO extracted_fields(id, submission_id, extraction_result_id, field_name, field_value, confidence, is_required, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), submission_id, extraction_id, "event_date", extracted_date or None, None, 1 if classifier == "container" else 0, "intake_scan", now_iso()),
+    )
+    conn.execute(
+        "UPDATE submissions SET classifier = ?, status = ?, updated_at = ?, dedupe_key = ?, duplicate_of = ?, fallback_date_used = ?, fallback_date_value = ? WHERE id = ?",
+        (classifier, status, now_iso(), dedupe_key, dup, 1 if not dates else 0, extracted_date if not dates else None, submission_id),
+    )
+    add_audit(conn, submission_id, "INTAKE_CLASSIFIED", "system", {"classifier": classifier, "status": status})
+    add_audit(conn, submission_id, "INTAKE_EXTRACTION", "system", {"issues": issues, "pipeline": pipeline_notes})
+    conn.commit()
+    conn.close()
+
     return {
         "ok": True,
         "scanId": str(uuid.uuid4()),
+        "submissionId": submission_id,
+        "status": status,
+        "classifier": classifier,
+        "fileHash": file_sha256,
+        "duplicateOf": dup,
         "extracted": {"containerNo": extracted_container, "date": extracted_date},
         "candidates": {"containerNos": containers, "dates": dates},
         "candidateDetails": {"containerNos": candidate_details},
@@ -1486,6 +1609,17 @@ def compute_dedupe_key(classifier: str, extracted: Dict[str, Any], file_sha256: 
     return f"sha:{file_sha256}"
 
 
+def classify_initial_document(filename: str, raw_text: str, containers: List[str], dates: List[str]) -> str:
+    if containers:
+        return "container"
+    text = f"{filename}\n{raw_text}".lower()
+    if any(k in text for k in ["receipt", "invoice", "purchase", "transaction"]):
+        return "receipt"
+    if dates:
+        return "receipt"
+    return "other"
+
+
 def add_audit(conn: sqlite3.Connection, submission_id: Optional[str], action: str, actor: str, details: Dict[str, Any]) -> None:
     conn.execute(
         "INSERT INTO audit_logs(id, submission_id, action, actor, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1589,6 +1723,7 @@ def fetch_submission_bundle(submission_id: str) -> Optional[Dict[str, Any]]:
 
 
 class SubmissionIn(BaseModel):
+    submissionId: Optional[str] = None
     sourceFileName: str
     fileType: str
     classifier: Optional[str] = "other"
@@ -1629,15 +1764,16 @@ def submit_document(payload: SubmissionIn):
     if file_type not in SUPPORTED_FILE_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported fileType '{file_type}'.")
 
-    submission_id = str(uuid.uuid4())
+    submission_id = (payload.submissionId or "").strip() or str(uuid.uuid4())
     now = now_iso()
-    file_sha256 = compute_sha256(payload.fileContentBase64, source_file_name, file_type, extracted)
+    file_sha256 = compute_sha256(payload.fileContentBase64, source_name=source_file_name, file_type=file_type, extracted=extracted)
     dedupe_key = compute_dedupe_key(classifier, extracted, file_sha256)
 
     conn = db_connect()
+    existing_submission = conn.execute("SELECT id FROM submissions WHERE id = ?", (submission_id,)).fetchone()
     existing = conn.execute(
-        "SELECT id FROM submissions WHERE file_sha256 = ? OR dedupe_key = ? ORDER BY created_at DESC LIMIT 1",
-        (file_sha256, dedupe_key),
+        "SELECT id FROM submissions WHERE id != ? AND (file_sha256 = ? OR dedupe_key = ?) ORDER BY created_at DESC LIMIT 1",
+        (submission_id, file_sha256, dedupe_key),
     ).fetchone()
     duplicate_of = existing["id"] if existing else None
 
@@ -1652,31 +1788,56 @@ def submit_document(payload: SubmissionIn):
     status = eval_out["status"]
     normalized = eval_out["normalized_extracted"]
 
-    conn.execute(
-        """
-        INSERT INTO submissions(
-            id, source_file_name, file_type, classifier, status,
-            uploaded_at, created_at, updated_at, file_sha256, dedupe_key,
-            duplicate_of, fallback_date_used, fallback_date_value, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            submission_id,
-            source_file_name,
-            file_type,
-            classifier,
-            status,
-            uploaded_at,
-            now,
-            now,
-            file_sha256,
-            dedupe_key,
-            duplicate_of,
-            1 if eval_out["fallback_date_used"] else 0,
-            eval_out["fallback_date_value"],
-            "",
-        ),
-    )
+    if existing_submission:
+        conn.execute(
+            """
+            UPDATE submissions
+               SET source_file_name = ?, file_type = ?, classifier = ?, status = ?,
+                   uploaded_at = ?, updated_at = ?, file_sha256 = ?, dedupe_key = ?,
+                   duplicate_of = ?, fallback_date_used = ?, fallback_date_value = ?
+             WHERE id = ?
+            """,
+            (
+                source_file_name,
+                file_type,
+                classifier,
+                status,
+                uploaded_at,
+                now,
+                file_sha256,
+                dedupe_key,
+                duplicate_of,
+                1 if eval_out["fallback_date_used"] else 0,
+                eval_out["fallback_date_value"],
+                submission_id,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO submissions(
+                id, source_file_name, file_type, classifier, status,
+                uploaded_at, created_at, updated_at, file_sha256, dedupe_key,
+                duplicate_of, fallback_date_used, fallback_date_value, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                submission_id,
+                source_file_name,
+                file_type,
+                classifier,
+                status,
+                uploaded_at,
+                now,
+                now,
+                file_sha256,
+                dedupe_key,
+                duplicate_of,
+                1 if eval_out["fallback_date_used"] else 0,
+                eval_out["fallback_date_value"],
+                "",
+            ),
+        )
 
     doc_file_id = str(uuid.uuid4())
     conn.execute(
