@@ -10,7 +10,7 @@
   <main class="container">
     <header class="hero">
       <h1>Review items below</h1>
-      <p>Check highlighted fields before submitting.</p>
+      <p>Review and confirm all fields before submitting.</p>
     </header>
 
     <section class="card">
@@ -19,22 +19,17 @@
 
       <form id="reviewForm" class="review-form" autocomplete="off">
         <label class="field-row" id="row-containerNo">
-          <span class="field-label"><span id="dot-containerNo" class="confidence-dot"></span>Container Number</span>
+          <span class="field-label">Container Number</span>
           <input id="containerNo" class="input" type="text" placeholder="ABCD1234567" />
         </label>
 
         <label class="field-row" id="row-eventDate">
-          <span class="field-label"><span id="dot-eventDate" class="confidence-dot"></span>Event Date</span>
+          <span class="field-label">Event Date</span>
           <input id="eventDate" class="input" type="text" placeholder="MM/DD/YYYY" />
           <small class="field-help">Accepted format: MM/DD/YYYY (use slashes, not dashes)</small>
         </label>
       </form>
 
-      <div class="legend">
-        <span><i class="confidence-dot green"></i> Good</span>
-        <span><i class="confidence-dot yellow"></i> Review</span>
-        <span><i class="confidence-dot red"></i> Fix required</span>
-      </div>
 
       <div class="actions-inline">
         <button id="rerunScan" class="btn secondary" type="button">Re-Run Scan</button>

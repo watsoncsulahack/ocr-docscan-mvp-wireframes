@@ -291,10 +291,7 @@
     const state = JSON.parse(raw);
     const containerInput = byId("containerNo");
     const eventInput = byId("eventDate");
-    const dotContainer = byId("dot-containerNo");
-    const dotDate = byId("dot-eventDate");
-    const rowContainer = byId("row-containerNo");
-    const rowDate = byId("row-eventDate");
+
     const submitBtn = byId("submitBtn");
     const rerunBtn = byId("rerunScan");
     const errBox = byId("reviewError");
@@ -317,10 +314,6 @@
 
       const s1 = classifyField(containerInput.value, Number(state.confidence?.containerNo || 0), validContainer, containerAdjusted);
       const s2 = classifyField(eventInput.value, Number(state.confidence?.eventDate || 0), validDate, dateAdjusted);
-      setDot(dotContainer, s1);
-      setDot(dotDate, s2);
-      setRowHighlight(rowContainer, s1);
-      setRowHighlight(rowDate, s2);
       return { s1, s2 };
     }
 
@@ -340,7 +333,7 @@
     submitBtn.addEventListener("click", async () => {
       const evalResult = evaluate();
       if (evalResult.s1 !== "green" || evalResult.s2 !== "green") {
-        errBox.textContent = "Review these items before submitting.";
+        errBox.textContent = "Please verify both fields and fix invalid values before submitting.";
         errBox.classList.remove("hidden");
         return;
       }
