@@ -509,6 +509,37 @@ def extract_date_candidates(raw_text: str) -> List[str]:
     return out
 
 
+def parse_exif_date_to_mmddyyyy(value: str) -> Optional[str]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y:%m:%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return dt.datetime.strptime(text, fmt).strftime("%m/%d/%Y")
+        except Exception:
+            continue
+    return None
+
+
+def extract_exif_capture_date_from_raw(raw: bytes) -> Optional[str]:
+    if Image is None:
+        return None
+    try:
+        img = Image.open(io.BytesIO(raw))
+        exif = img.getexif()
+        if not exif:
+            return None
+        # Prefer capture timestamp tags.
+        for tag_id in (36867, 36868, 306):  # DateTimeOriginal, DateTimeDigitized, DateTime
+            val = exif.get(tag_id)
+            parsed = parse_exif_date_to_mmddyyyy(str(val) if val is not None else "")
+            if parsed and valid_date(parsed):
+                return parsed
+    except Exception:
+        return None
+    return None
+
+
 def extract_pdf_text_and_image(raw: bytes) -> Tuple[str, Optional[object], List[str]]:
     notes: List[str] = []
     text_parts: List[str] = []
@@ -1162,6 +1193,8 @@ async def scan(file: UploadFile = File(...)):
                 image_for_ocr = None
         pipeline_notes.append("input_image")
 
+    exif_capture_date = extract_exif_capture_date_from_raw(raw) if is_image else None
+
     if is_image and env_bool("DIRECT_IMAGE_TO_LLM", "0"):
         pipeline_notes.append("llm_direct_image_mode")
 
@@ -1178,7 +1211,7 @@ async def scan(file: UploadFile = File(...)):
             pipeline_notes.append(llm_error)
 
         extracted_container = (llm_structured or {}).get("containerNo") or ""
-        extracted_date = (llm_structured or {}).get("date") or dt.datetime.now().strftime("%m/%d/%Y")
+        extracted_date = (llm_structured or {}).get("date") or exif_capture_date or dt.datetime.now().strftime("%m/%d/%Y")
 
         issues = []
         if not extracted_container:
@@ -1312,7 +1345,7 @@ async def scan(file: UploadFile = File(...)):
     if dates:
         extracted_date = llm_date if llm_date in dates else dates[0]
     else:
-        extracted_date = dt.datetime.now().strftime("%m/%d/%Y")
+        extracted_date = exif_capture_date or dt.datetime.now().strftime("%m/%d/%Y")
 
     issues = []
     if not valid_containers and not extracted_container:
