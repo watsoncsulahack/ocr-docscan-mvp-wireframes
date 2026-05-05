@@ -331,12 +331,8 @@
     });
 
     submitBtn.addEventListener("click", async () => {
-      const evalResult = evaluate();
-      if (evalResult.s1 !== "green" || evalResult.s2 !== "green") {
-        errBox.textContent = "Please verify both fields and fix invalid values before submitting.";
-        errBox.classList.remove("hidden");
-        return;
-      }
+      evaluate();
+      errBox.classList.add("hidden");
 
       submitBtn.disabled = true;
       submitBtn.textContent = "Submitting...";
