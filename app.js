@@ -351,8 +351,8 @@
             event_date: eventInput.value.trim(),
           },
           confidence: {
-            container_number: 1.0,
-            event_date: 1.0,
+            container_number: Number(state.confidence?.containerNo ?? 0.5),
+            event_date: Number(state.confidence?.eventDate ?? 0.5),
           },
         };
 
