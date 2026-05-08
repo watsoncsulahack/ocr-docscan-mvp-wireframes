@@ -54,6 +54,23 @@ Open:
 - Frontend: `http://127.0.0.1:8080`
 - Backend health: `http://127.0.0.1:8000/health`
 
+### Admin panel (separate launcher)
+
+Run the admin panel on its own local port (defaults to `8091`) with `admin.html` as the default route:
+
+```bash
+bash ./scripts/start_admin_panel.sh
+```
+
+Open:
+- `http://127.0.0.1:8091/`
+
+Optional custom port:
+
+```bash
+ADMIN_PANEL_PORT=8119 bash ./scripts/start_admin_panel.sh
+```
+
 ## GitHub Pages + Backend Wiring
 
 - Frontend reads backend URL from `config.js` (`window.OCR_BACKEND_URL`)
