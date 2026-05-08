@@ -467,10 +467,272 @@
     await loadRows();
   }
 
+  async function initAdminPage() {
+    const queueBody = byId("adminQueueBody");
+    const filterEl = byId("adminQueueFilter");
+    const refreshBtn = byId("adminRefresh");
+    const detailWrap = byId("adminDetail");
+    const selectedHint = byId("adminSelectedHint");
+    const submissionIdEl = byId("adminSubmissionId");
+    const submissionStatusEl = byId("adminSubmissionStatus");
+    const ruleResultsEl = byId("adminRuleResults");
+    const fieldEditorEl = byId("adminFieldEditor");
+    const actorEl = byId("adminActor");
+    const noteEl = byId("adminNote");
+    const rejectReasonEl = byId("adminRejectReason");
+    const actionMsgEl = byId("adminActionMsg");
+    const saveReviewBtn = byId("adminSaveReview");
+    const approveBtn = byId("adminApprove");
+    const rejectBtn = byId("adminReject");
+    const auditListEl = byId("adminAuditList");
+
+    if (!queueBody || !filterEl) return;
+
+    let selectedSubmissionId = null;
+    let selectedBundle = null;
+
+    async function fetchJson(path, init) {
+      const backend = await resolveBackendUrl();
+      const res = await fetch(`${backend}${path}`, init);
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`Invalid JSON response for ${path}`);
+      }
+    }
+
+    function getEditableFieldsFromUI() {
+      const out = {};
+      const inputs = fieldEditorEl.querySelectorAll("[data-field-name]");
+      inputs.forEach((input) => {
+        const key = input.getAttribute("data-field-name");
+        out[key] = (input.value || "").trim();
+      });
+      return out;
+    }
+
+    function setActionMessage(msg, isError = false) {
+      if (!actionMsgEl) return;
+      actionMsgEl.textContent = msg || "";
+      actionMsgEl.style.color = isError ? "#dc2626" : "inherit";
+    }
+
+    function renderAudit(auditRows) {
+      if (!auditListEl) return;
+      const rows = Array.isArray(auditRows) ? auditRows : [];
+      if (!rows.length) {
+        auditListEl.innerHTML = "<li>No audit entries.</li>";
+        return;
+      }
+      auditListEl.innerHTML = "";
+      rows.slice(0, 20).forEach((a) => {
+        const li = document.createElement("li");
+        let details = a.details || "";
+        try {
+          details = JSON.stringify(JSON.parse(details), null, 0);
+        } catch {
+          // keep raw
+        }
+        li.textContent = `${a.created_at || ""} · ${a.action || ""} · ${a.actor || ""} · ${details || ""}`;
+        auditListEl.appendChild(li);
+      });
+    }
+
+    function renderFieldEditor(bundle) {
+      if (!fieldEditorEl) return;
+      const fields = Array.isArray(bundle?.extractedFields) ? bundle.extractedFields : [];
+      if (!fields.length) {
+        fieldEditorEl.innerHTML = '<p class="note">No extracted fields to edit.</p>';
+        return;
+      }
+
+      fieldEditorEl.innerHTML = "";
+      fields.forEach((f) => {
+        const row = document.createElement("label");
+        row.className = "field-row";
+        row.innerHTML = `
+          <span class="field-label">${f.field_name}</span>
+          <input class="input" data-field-name="${f.field_name}" value="${(f.field_value || "").replace(/"/g, "&quot;")}" />
+          <small class="field-help">source=${f.source || "-"} confidence=${f.confidence == null ? "-" : f.confidence}</small>
+        `;
+        fieldEditorEl.appendChild(row);
+      });
+    }
+
+    function renderRuleSummary(bundle) {
+      if (!ruleResultsEl) return;
+      const tasks = Array.isArray(bundle?.reviewTasks) ? bundle.reviewTasks : [];
+      if (!tasks.length) {
+        ruleResultsEl.textContent = "No review tasks recorded.";
+        return;
+      }
+      const latest = tasks[0];
+      ruleResultsEl.textContent = `Review task: ${latest.status || "-"} · reason=${latest.reason_code || "-"} · assigned_to=${latest.assigned_to || "-"}`;
+    }
+
+    async function loadSubmissionDetail(submissionId) {
+      selectedSubmissionId = submissionId;
+      setActionMessage("");
+      selectedHint.classList.add("hidden");
+      detailWrap.classList.remove("hidden");
+
+      const out = await fetchJson(`/submission/${encodeURIComponent(submissionId)}`);
+      selectedBundle = out;
+
+      submissionIdEl.textContent = out?.submission?.id || submissionId;
+      submissionStatusEl.textContent = out?.submission?.status || "-";
+      renderRuleSummary(out);
+      renderFieldEditor(out);
+      renderAudit(out?.audit || []);
+    }
+
+    async function loadQueue() {
+      queueBody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+      setActionMessage("");
+      const mode = filterEl.value || "flagged";
+      let out;
+      if (mode === "flagged") {
+        out = await fetchJson("/admin/flagged");
+      } else if (mode === "all") {
+        out = await fetchJson("/admin/submissions");
+      } else {
+        out = await fetchJson(`/admin/submissions?status=${encodeURIComponent(mode)}`);
+      }
+
+      const rows = Array.isArray(out?.submissions) ? out.submissions : [];
+      if (!rows.length) {
+        queueBody.innerHTML = '<tr><td colspan="6">No submissions in this queue.</td></tr>';
+        return;
+      }
+
+      queueBody.innerHTML = "";
+      rows.forEach((s) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${s.id || "-"}</td>
+          <td>${s.source_file_name || "-"}</td>
+          <td>${s.classifier || "-"}</td>
+          <td>${s.status || "-"}</td>
+          <td>${s.created_at || "-"}</td>
+          <td><button class="btn secondary" data-open-id="${s.id}">Open</button></td>
+        `;
+        queueBody.appendChild(tr);
+      });
+    }
+
+    queueBody.addEventListener("click", async (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      const id = target.getAttribute("data-open-id");
+      if (!id) return;
+      try {
+        await loadSubmissionDetail(id);
+      } catch (err) {
+        setActionMessage(`Failed to load submission: ${err?.message || err}`, true);
+      }
+    });
+
+    filterEl.addEventListener("change", async () => {
+      try {
+        await loadQueue();
+      } catch (err) {
+        queueBody.innerHTML = `<tr><td colspan="6">Failed to load queue: ${err?.message || err}</td></tr>`;
+      }
+    });
+
+    refreshBtn?.addEventListener("click", async () => {
+      try {
+        await loadQueue();
+        if (selectedSubmissionId) {
+          await loadSubmissionDetail(selectedSubmissionId);
+        }
+      } catch (err) {
+        setActionMessage(`Refresh failed: ${err?.message || err}`, true);
+      }
+    });
+
+    saveReviewBtn?.addEventListener("click", async () => {
+      if (!selectedSubmissionId) return;
+      try {
+        const corrections = getEditableFieldsFromUI();
+        const out = await fetchJson(`/review/${encodeURIComponent(selectedSubmissionId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor: (actorEl?.value || "admin").trim() || "admin",
+            note: (noteEl?.value || "").trim() || null,
+            corrections,
+          }),
+        });
+        setActionMessage(`Saved review edits. Status: ${out.status}`);
+        await loadQueue();
+        await loadSubmissionDetail(selectedSubmissionId);
+      } catch (err) {
+        setActionMessage(`Save review failed: ${err?.message || err}`, true);
+      }
+    });
+
+    approveBtn?.addEventListener("click", async () => {
+      if (!selectedSubmissionId) return;
+      try {
+        const verifiedFields = getEditableFieldsFromUI();
+        const out = await fetchJson(`/approve/${encodeURIComponent(selectedSubmissionId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor: (actorEl?.value || "admin").trim() || "admin",
+            note: (noteEl?.value || "").trim() || null,
+            verifiedFields,
+          }),
+        });
+        setActionMessage(`Approved submission. Status: ${out.status}`);
+        await loadQueue();
+        await loadSubmissionDetail(selectedSubmissionId);
+      } catch (err) {
+        setActionMessage(`Approve failed: ${err?.message || err}`, true);
+      }
+    });
+
+    rejectBtn?.addEventListener("click", async () => {
+      if (!selectedSubmissionId) return;
+      const reason = (rejectReasonEl?.value || "").trim();
+      if (!reason) {
+        setActionMessage("Reject reason is required.", true);
+        return;
+      }
+      try {
+        const out = await fetchJson(`/reject/${encodeURIComponent(selectedSubmissionId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            actor: (actorEl?.value || "admin").trim() || "admin",
+            reason,
+          }),
+        });
+        setActionMessage(`Rejected submission. Status: ${out.status}`);
+        await loadQueue();
+        await loadSubmissionDetail(selectedSubmissionId);
+      } catch (err) {
+        setActionMessage(`Reject failed: ${err?.message || err}`, true);
+      }
+    });
+
+    try {
+      await loadQueue();
+    } catch (err) {
+      queueBody.innerHTML = `<tr><td colspan="6">Failed to load queue: ${err?.message || err}</td></tr>`;
+    }
+  }
+
   const page = document.body?.dataset?.page;
   if (page === "upload") initUploadPage();
   if (page === "processing") initProcessingPage();
   if (page === "review") initReviewPage();
   if (page === "confirmation") initConfirmationPage();
   if (page === "records") initRecordsPage();
+  if (page === "admin") initAdminPage();
 })();

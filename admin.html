@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Panel - OCR MVP</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body data-page="admin">
+  <main class="page">
+    <section class="card">
+      <div class="topbar">
+        <h2 class="h2">Admin Review Panel</h2>
+        <span id="backendStatus" class="status-chip">Backend: checking...</span>
+      </div>
+      <div class="hr"></div>
+
+      <div class="row" style="gap:10px; align-items:end;">
+        <label>
+          <span class="field-help">Queue</span>
+          <select id="adminQueueFilter" class="input">
+            <option value="flagged">Flagged (needs review + duplicates)</option>
+            <option value="all">All submissions</option>
+            <option value="NEEDS_REVIEW">Needs review</option>
+            <option value="DUPLICATE">Duplicate</option>
+            <option value="APPROVED">Approved</option>
+            <option value="REJECTED">Rejected</option>
+            <option value="PROCESSING">Processing</option>
+          </select>
+        </label>
+        <button id="adminRefresh" class="btn secondary" type="button">Refresh</button>
+      </div>
+
+      <table class="table" aria-label="admin submissions" style="margin-top:12px;">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Source</th>
+            <th>Classifier</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="adminQueueBody">
+          <tr><td colspan="6">Loading...</td></tr>
+        </tbody>
+      </table>
+
+      <div class="hr" style="margin-top:20px;"></div>
+      <h3 class="h3">Submission Detail</h3>
+      <p id="adminSelectedHint" class="note">Select a submission from the queue.</p>
+
+      <div id="adminDetail" class="hidden">
+        <p class="note"><strong>ID:</strong> <span id="adminSubmissionId"></span> · <strong>Status:</strong> <span id="adminSubmissionStatus"></span></p>
+
+        <div id="adminRuleResults" class="note"></div>
+
+        <div id="adminFieldEditor" class="review-form" style="margin-top:10px;"></div>
+
+        <label style="display:block; margin-top:10px;">
+          <span class="field-help">Actor</span>
+          <input id="adminActor" class="input" type="text" value="admin" />
+        </label>
+
+        <label style="display:block; margin-top:10px;">
+          <span class="field-help">Review note</span>
+          <textarea id="adminNote" class="input" rows="3" placeholder="Optional note for review/approval"></textarea>
+        </label>
+
+        <label style="display:block; margin-top:10px;">
+          <span class="field-help">Reject reason</span>
+          <input id="adminRejectReason" class="input" type="text" placeholder="Required only when rejecting" />
+        </label>
+
+        <div class="actions-inline" style="margin-top:12px;">
+          <button id="adminSaveReview" class="btn secondary" type="button">Save Review Edits</button>
+          <button id="adminApprove" class="btn" type="button">Approve</button>
+          <button id="adminReject" class="btn secondary" type="button">Reject</button>
+        </div>
+
+        <div id="adminActionMsg" class="note" style="margin-top:10px;"></div>
+
+        <div class="hr" style="margin-top:16px;"></div>
+        <h4 class="h3">Audit Trail</h4>
+        <ul id="adminAuditList" class="note"></ul>
+      </div>
+
+      <div class="hr" style="margin-top:20px;"></div>
+      <div class="row">
+        <a class="btn" href="./upload.html">Back to Upload</a>
+        <a class="btn" href="./records.html">Records</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js?v=20260508a"></script>
+</body>
+</html>

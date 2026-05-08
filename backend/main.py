@@ -2026,8 +2026,8 @@ def review_submission(submission_id: str, payload: ReviewActionIn):
 
     conn.execute("UPDATE submissions SET updated_at = ?, status = ? WHERE id = ?", (now, "NEEDS_REVIEW", submission_id))
     conn.execute(
-        "UPDATE review_tasks SET status = ?, resolution_note = ?, resolved_at = ? WHERE submission_id = ? AND status = 'OPEN'",
-        ("IN_PROGRESS", payload.note, None, submission_id),
+        "UPDATE review_tasks SET status = ?, assigned_to = ?, resolution_note = ?, resolved_at = ? WHERE submission_id = ? AND status IN ('OPEN','IN_PROGRESS')",
+        ("IN_PROGRESS", actor, payload.note, None, submission_id),
     )
     add_audit(conn, submission_id, "REVIEW_EDIT", actor, {"corrections": corrections, "note": payload.note})
     conn.commit()
