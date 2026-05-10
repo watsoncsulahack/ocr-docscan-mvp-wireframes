@@ -29,6 +29,28 @@ This repo now includes:
 
 ## Run locally
 
+### Device bootstrap (new)
+
+For test devices (non-primary dev devices), use one command to set up and start backend:
+
+```bash
+bash ./scripts/bootstrap_device.sh
+```
+
+Optional env knobs:
+
+```bash
+OCR_MVP_PROFILE=phone OCR_MVP_LLM=gemini bash ./scripts/bootstrap_device.sh
+OCR_MVP_SHARE=1 bash ./scripts/bootstrap_device.sh
+```
+
+What it does:
+- validates `python3` + `git`
+- creates/uses `.venv`
+- installs `backend/requirements.txt`
+- runs `scripts/run_dev.sh up`
+- prints frontend/backend/admin test URLs
+
 ### 1) Backend
 
 ```bash
