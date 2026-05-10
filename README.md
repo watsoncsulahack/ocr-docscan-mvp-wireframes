@@ -29,27 +29,27 @@ This repo now includes:
 
 ## Run locally
 
-### Device bootstrap (new)
+### Universal bootstrap (single entrypoint)
 
-For test devices (non-primary dev devices), use one command to set up and start backend:
+Use one script on Android/Termux or regular Linux/macOS devices:
 
 ```bash
-bash ./scripts/bootstrap_device.sh
+bash ./scripts/bootstrap_mvp.sh
 ```
 
 Optional env knobs:
 
 ```bash
-OCR_MVP_PROFILE=phone OCR_MVP_LLM=gemini bash ./scripts/bootstrap_device.sh
-OCR_MVP_SHARE=1 bash ./scripts/bootstrap_device.sh
+OCR_MVP_PROFILE=phone OCR_MVP_LLM=gemini bash ./scripts/bootstrap_mvp.sh
+OCR_MVP_BACKEND_PORT=8010 OCR_MVP_FRONTEND_PORT=8080 bash ./scripts/bootstrap_mvp.sh
 ```
 
 What it does:
-- validates `python3` + `git`
-- creates/uses `.venv`
-- installs `backend/requirements.txt`
-- runs `scripts/run_dev.sh up`
-- prints frontend/backend/admin test URLs
+- installs/verifies base dependencies
+- clones/updates repo when run outside repo
+- creates/uses `.venv` and installs `backend/requirements.txt`
+- launches backend + frontend (tmux sessions when available)
+- prints MVP + admin URLs
 
 ### Vanilla Android (Termux + tmux) one-shot bootstrap
 
@@ -58,6 +58,8 @@ On a fresh Android test device (Termux):
 ```bash
 bash ./scripts/bootstrap_android_tmux.sh
 ```
+
+This is a compatibility wrapper around `bootstrap_mvp.sh` with Android-friendly defaults.
 
 This script will:
 - install required Termux packages (`git`, `python`, `tmux`, `curl`)
@@ -136,6 +138,7 @@ This keeps the UI looking and behaving like a real review queue (open/review/app
 
 - Frontend reads backend URL from `config.js` (`window.OCR_BACKEND_URL`)
 - You can override at runtime from the index page and save in localStorage.
+- GitHub Pages deployment workflow: `.github/workflows/deploy-pages.yml` (push to `main` or `sprint3/phase0-baseline-local-first`)
 
 ## One project, multi-platform (phone + laptop)
 
