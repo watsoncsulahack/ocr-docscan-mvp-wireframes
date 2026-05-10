@@ -71,10 +71,54 @@ Optional custom port:
 ADMIN_PANEL_PORT=8119 bash ./scripts/start_admin_panel.sh
 ```
 
+### Admin panel on GitHub Pages (with fake DB)
+
+`admin.html` now supports a built-in mock database fallback for static hosting.
+
+- On `github.io`, if local backend is unreachable, it auto-switches to mock DB.
+- You can force mock mode anywhere with `?mockdb=1`.
+
+Example:
+
+```text
+https://<your-user>.github.io/ocr-docscan-mvp-wireframes/admin.html?mockdb=1
+```
+
+This keeps the UI looking and behaving like a real review queue (open/review/approve/reject) while persisting fake state in browser `localStorage`.
+
 ## GitHub Pages + Backend Wiring
 
 - Frontend reads backend URL from `config.js` (`window.OCR_BACKEND_URL`)
 - You can override at runtime from the index page and save in localStorage.
+
+## One project, multi-platform (phone + laptop)
+
+Use one wrapper script for both devices:
+
+```bash
+# Local backend only
+bash ./scripts/run_dev.sh up
+
+# Local backend + public tunnel
+bash ./scripts/run_dev.sh share
+
+# Stop tunnel + backend
+bash ./scripts/run_dev.sh down
+```
+
+Optional profile and LLM mode knobs:
+
+```bash
+OCR_MVP_PROFILE=phone  bash ./scripts/run_dev.sh up
+OCR_MVP_PROFILE=laptop bash ./scripts/run_dev.sh up
+OCR_MVP_LLM=ollama     bash ./scripts/run_dev.sh up
+OCR_MVP_LOCAL_OCR=1    bash ./scripts/run_dev.sh up
+```
+
+Notes:
+- `OCR_MVP_PROFILE=auto` (default) auto-detects phone vs laptop.
+- `OCR_MVP_LLM=ollama` maps to OpenAI-compatible mode with default `LLM_BASE_URL=http://127.0.0.1:11434/v1`.
+- Keep the same repo and scripts on both platforms; only env/profile changes.
 
 ## No-account sharing mode (free)
 

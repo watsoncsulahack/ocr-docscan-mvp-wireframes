@@ -2,6 +2,7 @@
   const PENDING_FILE_KEY = "ocr.pending.file";
   const REVIEW_STATE_KEY = "ocr.review.state";
   const LAST_SUBMISSION_KEY = "ocr.last.submission";
+  const ADMIN_MOCK_DB_KEY = "ocr.admin.mockdb.v1";
   let BACKEND_BASE_CACHE = null;
 
   function setBackendStatus(online) {
@@ -490,18 +491,187 @@
 
     let selectedSubmissionId = null;
     let selectedBundle = null;
+    const forceMock = new URLSearchParams(window.location.search).get("mockdb") === "1";
+    const isGitHubPages = /github\.io$/i.test(window.location.hostname || "");
+    let useMockDb = forceMock;
+
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function seedMockDb() {
+      const seeded = {
+        submissions: [
+          {
+            id: "SUB-20260510-0001",
+            source_file_name: "dock_receipt_alpha.pdf",
+            classifier: "container",
+            status: "NEEDS_REVIEW",
+            created_at: nowIso(),
+          },
+          {
+            id: "SUB-20260510-0002",
+            source_file_name: "yard_scan_beta.jpg",
+            classifier: "container",
+            status: "DUPLICATE",
+            created_at: nowIso(),
+          },
+          {
+            id: "SUB-20260510-0003",
+            source_file_name: "gate_capture_gamma.png",
+            classifier: "container",
+            status: "APPROVED",
+            created_at: nowIso(),
+          },
+        ],
+        details: {
+          "SUB-20260510-0001": {
+            submission: { id: "SUB-20260510-0001", status: "NEEDS_REVIEW" },
+            extractedFields: [
+              { field_name: "container_number", field_value: "MSCU1234567", source: "ocr", confidence: 0.74 },
+              { field_name: "event_date", field_value: "10/05/2026", source: "ocr", confidence: 0.81 },
+            ],
+            reviewTasks: [{ status: "OPEN", reason_code: "LOW_CONFIDENCE", assigned_to: "admin" }],
+            audit: [{ created_at: nowIso(), action: "QUEUED", actor: "system", details: "{\"note\":\"Auto-ingested\"}" }],
+          },
+          "SUB-20260510-0002": {
+            submission: { id: "SUB-20260510-0002", status: "DUPLICATE" },
+            extractedFields: [
+              { field_name: "container_number", field_value: "MSCU1234567", source: "ocr", confidence: 0.95 },
+              { field_name: "event_date", field_value: "10/05/2026", source: "ocr", confidence: 0.93 },
+            ],
+            reviewTasks: [{ status: "OPEN", reason_code: "POSSIBLE_DUPLICATE", assigned_to: "admin" }],
+            audit: [{ created_at: nowIso(), action: "FLAG_DUPLICATE", actor: "rules", details: "{\"match\":\"SUB-20260510-0001\"}" }],
+          },
+          "SUB-20260510-0003": {
+            submission: { id: "SUB-20260510-0003", status: "APPROVED" },
+            extractedFields: [
+              { field_name: "container_number", field_value: "OOLU7654321", source: "ocr", confidence: 0.98 },
+              { field_name: "event_date", field_value: "09/05/2026", source: "ocr", confidence: 0.97 },
+            ],
+            reviewTasks: [{ status: "DONE", reason_code: "NONE", assigned_to: "admin" }],
+            audit: [{ created_at: nowIso(), action: "APPROVED", actor: "admin", details: "{\"note\":\"Looks good\"}" }],
+          },
+        },
+      };
+      localStorage.setItem(ADMIN_MOCK_DB_KEY, JSON.stringify(seeded));
+      return seeded;
+    }
+
+    function loadMockDb() {
+      try {
+        const raw = localStorage.getItem(ADMIN_MOCK_DB_KEY);
+        if (!raw) return seedMockDb();
+        const parsed = JSON.parse(raw);
+        if (!parsed?.submissions || !parsed?.details) return seedMockDb();
+        return parsed;
+      } catch {
+        return seedMockDb();
+      }
+    }
+
+    function saveMockDb(db) {
+      localStorage.setItem(ADMIN_MOCK_DB_KEY, JSON.stringify(db));
+    }
+
+    function setMockStatus() {
+      const wrap = byId("backendStatus");
+      if (!wrap) return;
+      wrap.classList.remove("online", "offline");
+      wrap.textContent = "Backend: demo mock DB";
+    }
+
+    async function mockFetchJson(path, init) {
+      const db = loadMockDb();
+      const method = (init?.method || "GET").toUpperCase();
+
+      if (path === "/admin/flagged") {
+        const submissions = db.submissions.filter((s) => s.status === "NEEDS_REVIEW" || s.status === "DUPLICATE");
+        return { submissions };
+      }
+      if (path.startsWith("/admin/submissions")) {
+        const url = new URL(`http://local${path}`);
+        const status = url.searchParams.get("status");
+        return { submissions: status ? db.submissions.filter((s) => s.status === status) : db.submissions };
+      }
+      if (path.startsWith("/submission/")) {
+        const id = decodeURIComponent(path.split("/submission/")[1] || "");
+        return db.details[id] || { submission: { id, status: "UNKNOWN" }, extractedFields: [], reviewTasks: [], audit: [] };
+      }
+
+      const m = path.match(/^\/(review|approve|reject)\/(.+)$/);
+      if (m && method === "POST") {
+        const action = m[1];
+        const id = decodeURIComponent(m[2]);
+        const payload = init?.body ? JSON.parse(init.body) : {};
+        const detail = db.details[id];
+        const sub = db.submissions.find((s) => s.id === id);
+        if (!detail || !sub) throw new Error("Mock submission not found");
+
+        if (action === "review") {
+          const corrections = payload?.corrections || {};
+          detail.extractedFields = detail.extractedFields.map((f) => ({
+            ...f,
+            field_value: Object.prototype.hasOwnProperty.call(corrections, f.field_name)
+              ? corrections[f.field_name]
+              : f.field_value,
+            source: "admin_review",
+          }));
+          sub.status = "NEEDS_REVIEW";
+          detail.submission.status = sub.status;
+          detail.audit.unshift({ created_at: nowIso(), action: "REVIEW_EDITED", actor: payload?.actor || "admin", details: JSON.stringify({ note: payload?.note || null }) });
+        }
+
+        if (action === "approve") {
+          const verifiedFields = payload?.verifiedFields || {};
+          detail.extractedFields = detail.extractedFields.map((f) => ({
+            ...f,
+            field_value: Object.prototype.hasOwnProperty.call(verifiedFields, f.field_name)
+              ? verifiedFields[f.field_name]
+              : f.field_value,
+            source: "admin_approved",
+          }));
+          sub.status = "APPROVED";
+          detail.submission.status = sub.status;
+          detail.audit.unshift({ created_at: nowIso(), action: "APPROVED", actor: payload?.actor || "admin", details: JSON.stringify({ note: payload?.note || null }) });
+        }
+
+        if (action === "reject") {
+          sub.status = "REJECTED";
+          detail.submission.status = sub.status;
+          detail.audit.unshift({ created_at: nowIso(), action: "REJECTED", actor: payload?.actor || "admin", details: JSON.stringify({ reason: payload?.reason || "unspecified" }) });
+        }
+
+        saveMockDb(db);
+        return { status: sub.status, submissionId: id };
+      }
+
+      throw new Error(`Mock route not implemented: ${path}`);
+    }
 
     async function fetchJson(path, init) {
-      const backend = await resolveBackendUrl();
-      const res = await fetch(`${backend}${path}`, init);
-      const text = await res.text();
-      if (!res.ok) {
-        throw new Error(text || `HTTP ${res.status}`);
+      if (useMockDb) {
+        return mockFetchJson(path, init);
       }
       try {
-        return JSON.parse(text);
-      } catch {
-        throw new Error(`Invalid JSON response for ${path}`);
+        const backend = await resolveBackendUrl();
+        const res = await fetch(`${backend}${path}`, init);
+        const text = await res.text();
+        if (!res.ok) {
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        try {
+          return JSON.parse(text);
+        } catch {
+          throw new Error(`Invalid JSON response for ${path}`);
+        }
+      } catch (err) {
+        if (isGitHubPages || forceMock) {
+          useMockDb = true;
+          setMockStatus();
+          return mockFetchJson(path, init);
+        }
+        throw err;
       }
     }
 
@@ -722,6 +892,7 @@
     });
 
     try {
+      if (forceMock) setMockStatus();
       await loadQueue();
     } catch (err) {
       queueBody.innerHTML = `<tr><td colspan="6">Failed to load queue: ${err?.message || err}</td></tr>`;
