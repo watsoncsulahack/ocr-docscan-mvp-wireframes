@@ -51,6 +51,30 @@ What it does:
 - runs `scripts/run_dev.sh up`
 - prints frontend/backend/admin test URLs
 
+### Vanilla Android (Termux + tmux) one-shot bootstrap
+
+On a fresh Android test device (Termux):
+
+```bash
+bash ./scripts/bootstrap_android_tmux.sh
+```
+
+This script will:
+- install required Termux packages (`git`, `python`, `tmux`, `curl`)
+- clone or update the repo
+- create `.venv` + install Python deps
+- start backend in tmux session `ocr-backend`
+- start frontend in tmux session `ocr-frontend`
+- print working URLs and health status
+
+Useful tmux commands:
+
+```bash
+tmux attach -t ocr-backend
+tmux attach -t ocr-frontend
+tmux ls
+```
+
 ### 1) Backend
 
 ```bash
