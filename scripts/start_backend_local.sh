@@ -8,6 +8,7 @@ LOG="${OCR_MVP_LOG:-/tmp/ocr-docscan-backend.log}"
 PID_FILE="${OCR_MVP_PID:-/tmp/ocr-docscan-backend.pid}"
 RUNTIME_DIR="$ROOT_DIR/data/runtime"
 LOCAL_URL_FILE="$RUNTIME_DIR/local_backend_url.txt"
+DB_PATH="$ROOT_DIR/data/records.sqlite"
 
 REQ_BASE_DEFAULT="$ROOT_DIR/backend/requirements.txt"
 REQ_BASE="${OCR_MVP_REQUIREMENTS_FILE:-$REQ_BASE_DEFAULT}"
@@ -18,6 +19,7 @@ REQ_MARKER="$VENV_DIR/.requirements.sha256"
 INSTALL_LOCAL_OCR="${OCR_MVP_INSTALL_LOCAL_OCR:-0}"
 INSTALL_DOCTR="${OCR_MVP_INSTALL_DOCTR:-0}"
 SKIP_INSTALL="${OCR_MVP_SKIP_INSTALL:-0}"
+CLEAN_DB="${OCR_MVP_CLEAN_DB:-0}"
 ENV_FILE="$ROOT_DIR/.env"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -27,6 +29,26 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+LLM_MODE="${OCR_MVP_LLM:-auto}"
+case "$LLM_MODE" in
+  ollama)
+    export LLM_PROVIDER="openai"
+    export LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:11434/v1}"
+    ;;
+  gemini)
+    export LLM_PROVIDER="gemini"
+    ;;
+  openai)
+    export LLM_PROVIDER="openai"
+    ;;
+  auto)
+    ;;
+  *)
+    echo "[ocr-mvp] unknown OCR_MVP_LLM='$LLM_MODE' (use auto|ollama|gemini|openai)" >&2
+    exit 1
+    ;;
+esac
+
 is_termux=0
 if [[ "${OCR_MVP_FORCE_TERMUX:-0}" == "1" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]] || [[ -d "/data/data/com.termux" ]]; then
   is_termux=1
@@ -34,6 +56,11 @@ fi
 
 mkdir -p "$(dirname "$LOG")"
 mkdir -p "$RUNTIME_DIR"
+
+if [[ "$CLEAN_DB" == "1" ]] && [[ -f "$DB_PATH" ]]; then
+  echo "[ocr-mvp] clean DB requested; removing $DB_PATH"
+  rm -f "$DB_PATH"
+fi
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "[ocr-mvp] creating venv: $VENV_DIR"

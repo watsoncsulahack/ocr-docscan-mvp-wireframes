@@ -42,12 +42,16 @@ Optional env knobs:
 ```bash
 OCR_MVP_PROFILE=phone OCR_MVP_LLM=gemini bash ./scripts/bootstrap_mvp.sh
 OCR_MVP_BACKEND_PORT=8010 OCR_MVP_FRONTEND_PORT=8080 bash ./scripts/bootstrap_mvp.sh
+OCR_MVP_LLM=ollama OCR_MVP_OLLAMA_MODEL=llama3.2:3b bash ./scripts/bootstrap_mvp.sh
+bash ./scripts/bootstrap_mvp.sh --clean
 ```
 
 What it does:
 - installs/verifies base dependencies
 - clones/updates repo when run outside repo
+- initializes/updates git submodules (including `third_party/ollama`)
 - creates/uses `.venv` and installs `backend/requirements.txt`
+- when `OCR_MVP_LLM=ollama`, starts local Ollama + pulls model via `scripts/ollama_local.sh`
 - launches backend + frontend (tmux sessions when available)
 - prints MVP + admin URLs
 
@@ -167,12 +171,26 @@ OCR_MVP_PROFILE=phone  bash ./scripts/run_dev.sh up
 OCR_MVP_PROFILE=laptop bash ./scripts/run_dev.sh up
 OCR_MVP_LLM=ollama     bash ./scripts/run_dev.sh up
 OCR_MVP_LOCAL_OCR=1    bash ./scripts/run_dev.sh up
+bash ./scripts/run_dev.sh up --clean
 ```
 
 Notes:
 - `OCR_MVP_PROFILE=auto` (default) auto-detects phone vs laptop.
 - `OCR_MVP_LLM=ollama` maps to OpenAI-compatible mode with default `LLM_BASE_URL=http://127.0.0.1:11434/v1`.
 - Keep the same repo and scripts on both platforms; only env/profile changes.
+
+### Ollama manager (local)
+
+```bash
+bash ./scripts/ollama_local.sh start
+bash ./scripts/ollama_local.sh status
+bash ./scripts/ollama_local.sh stop
+```
+
+Useful env knobs:
+- `OCR_MVP_OLLAMA_MODEL` (default `llama3.2:3b`)
+- `OCR_MVP_OLLAMA_AUTO_PULL=1|0`
+- `OCR_MVP_OLLAMA_INSTALL=1` (attempt auto-install via official script if ollama is missing)
 
 ## No-account sharing mode (free)
 
@@ -280,6 +298,13 @@ Control panel is separated from the GitHub Pages MVP UI:
 - `OCR_MVP_INSTALL_LOCAL_OCR=1` installs `backend/requirements-optional-local-ocr.txt`
 - `OCR_MVP_INSTALL_DOCTR=1` installs `backend/requirements-optional-doctr.txt`
 - `ENABLE_DOCTR=1` enables DocTR usage at runtime
+
+### Clean database startup
+
+- `./scripts/bootstrap_mvp.sh --clean` or `OCR_MVP_CLEAN_DB=1`
+- `./scripts/run_dev.sh up --clean`
+
+This removes `data/records.sqlite` before backend startup so testing begins with no prior entries.
 
 ## Security Notes (demo-light)
 

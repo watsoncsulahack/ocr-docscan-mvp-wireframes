@@ -15,6 +15,8 @@ PROFILE="${OCR_MVP_PROFILE:-auto}"   # auto | phone | laptop
 LLM="${OCR_MVP_LLM:-auto}"           # auto | ollama | gemini | openai
 USE_TMUX="${OCR_MVP_USE_TMUX:-1}"    # 1 | 0
 GIT_UPDATE="${OCR_MVP_GIT_UPDATE:-1}" # 1 | 0
+CLEAN_DB="${OCR_MVP_CLEAN_DB:-0}"    # 1 | 0
+OLLAMA_AUTO="${OCR_MVP_OLLAMA_AUTO:-1}" # 1 | 0 (when LLM=ollama)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -26,6 +28,42 @@ fi
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+usage() {
+  cat <<EOF
+Usage: ./scripts/bootstrap_mvp.sh [--clean]
+
+Options:
+  --clean      start with a clean DB (removes data/records.sqlite before backend start)
+  --help       show this help
+
+Env knobs:
+  OCR_MVP_LLM=ollama          enable Ollama path
+  OCR_MVP_OLLAMA_AUTO=1       auto-start ollama via scripts/ollama_local.sh (default)
+  OCR_MVP_OLLAMA_MODEL=...    model to pull (default: llama3.2:3b)
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --clean)
+        CLEAN_DB=1
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "[bootstrap-mvp] unknown argument: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+    shift
+  done
+  export OCR_MVP_CLEAN_DB="$CLEAN_DB"
 }
 
 update_repo_if_possible() {
@@ -50,6 +88,48 @@ update_repo_if_possible() {
   if ! git -C "$root" pull --ff-only; then
     echo "[bootstrap-mvp] warning: git pull --ff-only failed (local changes or diverged branch). Continuing." >&2
   fi
+}
+
+init_submodules_if_present() {
+  local root="$1"
+  [[ -f "$root/.gitmodules" ]] || return 0
+
+  echo "[bootstrap-mvp] initializing/updating git submodules"
+  git -C "$root" submodule sync --recursive || true
+  if ! git -C "$root" -c http.version=HTTP/1.1 submodule update --init --recursive --depth 1; then
+    echo "[bootstrap-mvp] warning: shallow submodule update failed; retrying full update" >&2
+    git -C "$root" submodule update --init --recursive
+  fi
+}
+
+configure_llm_runtime() {
+  local root="$1"
+  case "$LLM" in
+    ollama)
+      export LLM_PROVIDER="openai"
+      export LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:11434/v1}"
+      if [[ "$OLLAMA_AUTO" == "1" ]]; then
+        if [[ ! -x "$root/scripts/ollama_local.sh" ]]; then
+          echo "[bootstrap-mvp] ERROR: scripts/ollama_local.sh is missing or not executable." >&2
+          exit 1
+        fi
+        OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" \
+          bash "$root/scripts/ollama_local.sh" start
+      fi
+      ;;
+    gemini)
+      export LLM_PROVIDER="gemini"
+      ;;
+    openai)
+      export LLM_PROVIDER="openai"
+      ;;
+    auto)
+      ;;
+    *)
+      echo "[bootstrap-mvp] ERROR: unknown OCR_MVP_LLM='$LLM' (use auto|ollama|gemini|openai)" >&2
+      exit 1
+      ;;
+  esac
 }
 
 install_base_deps() {
@@ -119,7 +199,7 @@ start_with_tmux() {
   tmux kill-session -t ocr-frontend 2>/dev/null || true
 
   tmux new-session -d -s ocr-backend \
-    "cd '$root' && source .venv/bin/activate && OCR_MVP_PROFILE='$PROFILE' OCR_MVP_LLM='$LLM' OCR_MVP_PORT='$BACKEND_PORT' OCR_MVP_VENV='$root/.venv' ANDROID_API_LEVEL='${ANDROID_API_LEVEL:-}' bash ./scripts/start_backend_local.sh"
+    "cd '$root' && source .venv/bin/activate && OCR_MVP_PROFILE='$PROFILE' OCR_MVP_LLM='$LLM' OCR_MVP_CLEAN_DB='$CLEAN_DB' OCR_MVP_PORT='$BACKEND_PORT' OCR_MVP_VENV='$root/.venv' LLM_PROVIDER='${LLM_PROVIDER:-}' LLM_BASE_URL='${LLM_BASE_URL:-}' ANDROID_API_LEVEL='${ANDROID_API_LEVEL:-}' bash ./scripts/start_backend_local.sh"
 
   tmux new-session -d -s ocr-frontend \
     "cd '$root' && python3 -m http.server '$FRONTEND_PORT' --bind 127.0.0.1"
@@ -140,7 +220,7 @@ start_without_tmux() {
   (
     cd "$root"
     source .venv/bin/activate
-    OCR_MVP_PROFILE="$PROFILE" OCR_MVP_LLM="$LLM" OCR_MVP_PORT="$BACKEND_PORT" OCR_MVP_VENV="$root/.venv" ANDROID_API_LEVEL="${ANDROID_API_LEVEL:-}" \
+    OCR_MVP_PROFILE="$PROFILE" OCR_MVP_LLM="$LLM" OCR_MVP_CLEAN_DB="$CLEAN_DB" OCR_MVP_PORT="$BACKEND_PORT" OCR_MVP_VENV="$root/.venv" LLM_PROVIDER="${LLM_PROVIDER:-}" LLM_BASE_URL="${LLM_BASE_URL:-}" ANDROID_API_LEVEL="${ANDROID_API_LEVEL:-}" \
       bash ./scripts/start_backend_local.sh
   ) >"$backend_log" 2>&1 &
   echo $! > "$backend_pid"
@@ -153,17 +233,25 @@ start_without_tmux() {
 }
 
 main() {
+  parse_args "$@"
+
   echo "[bootstrap-mvp] preparing environment"
   install_base_deps
 
   local root
   root="$(resolve_repo_root)"
   update_repo_if_possible "$root"
+  init_submodules_if_present "$root"
   cd "$root"
 
   echo "[bootstrap-mvp] repo: $root"
   echo "[bootstrap-mvp] python=$(python3 --version 2>/dev/null | tr -d '\n') termux=$is_termux"
   echo "[bootstrap-mvp] requirements=backend/requirements.txt"
+  if [[ "$CLEAN_DB" == "1" ]]; then
+    echo "[bootstrap-mvp] clean DB mode enabled (--clean)"
+  fi
+
+  configure_llm_runtime "$root"
 
   if [[ "$is_termux" == "1" ]]; then
     if ! ensure_cmd rustc || ! ensure_cmd cargo; then

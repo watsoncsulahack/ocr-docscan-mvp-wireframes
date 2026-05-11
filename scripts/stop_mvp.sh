@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_PORT="${OCR_MVP_BACKEND_PORT:-8010}"
 FRONTEND_PORT="${OCR_MVP_FRONTEND_PORT:-8080}"
+STOP_OLLAMA="${OCR_MVP_STOP_OLLAMA:-1}"
 
 stopped=0
 
@@ -97,4 +98,8 @@ if [[ "$stopped" == "0" ]]; then
   echo "[stop-mvp] no running MVP server processes found"
 else
   echo "[stop-mvp] done"
+fi
+
+if [[ "$STOP_OLLAMA" == "1" ]] && [[ -x "$ROOT_DIR/scripts/ollama_local.sh" ]]; then
+  bash "$ROOT_DIR/scripts/ollama_local.sh" stop || true
 fi
