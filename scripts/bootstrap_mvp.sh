@@ -218,19 +218,19 @@ main() {
 
   echo ""
   if [[ "$ok" == "1" ]]; then
-    echo "✅ Backend healthy: $health_url"
+    echo "✅ Backend: $health_url"
   else
-    echo "⚠️ Backend still starting: $health_url"
+    echo "⚠️ Backend (still starting): $health_url"
     if [[ -f "$root/.local/backend.log" ]]; then
       echo "[bootstrap-mvp] tail backend log:"
       tail -n 30 "$root/.local/backend.log" || true
     fi
   fi
   echo "✅ Frontend: $frontend_url"
-  echo "✅ Frontend (localhost): http://localhost:${FRONTEND_PORT}"
   echo "✅ Admin panel: $frontend_url/admin.html"
-  echo "✅ Admin panel (mock DB): $frontend_url/admin.html?mockdb=1"
-  echo "🛑 Stop servers: bash ./scripts/stop_mvp.sh"
+
+  echo "To stop the above servers, run this script:"
+  echo "  $root/scripts/stop_mvp.sh"
 
   if [[ "$USE_TMUX" == "1" ]] && ensure_cmd tmux; then
     echo ""
