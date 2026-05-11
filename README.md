@@ -51,6 +51,11 @@ What it does:
 - launches backend + frontend (tmux sessions when available)
 - prints MVP + admin URLs
 
+Termux note:
+- On Termux, bootstrap installs Rust/clang/pkg-config and uses the same
+  dependency set as other platforms, so `pydantic-core` can compile when
+  wheels are unavailable.
+
 ### Vanilla Android (Termux + tmux) one-shot bootstrap
 
 On a fresh Android test device (Termux):

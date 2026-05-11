@@ -32,6 +32,12 @@ install_base_deps() {
   ensure_cmd git || need=1
   ensure_cmd python3 || need=1
   ensure_cmd curl || need=1
+  if [[ "$is_termux" == "1" ]]; then
+    ensure_cmd rustc || need=1
+    ensure_cmd cargo || need=1
+    ensure_cmd pkg-config || need=1
+    ensure_cmd clang || need=1
+  fi
   if [[ "$USE_TMUX" == "1" ]]; then
     ensure_cmd tmux || need=1
   fi
@@ -40,7 +46,7 @@ install_base_deps() {
   echo "[bootstrap-mvp] installing missing system packages"
   if [[ "$is_termux" == "1" ]] && ensure_cmd pkg; then
     pkg update -y
-    pkg install -y git python tmux curl
+    pkg install -y git python tmux curl rust clang pkg-config
     return 0
   fi
 
@@ -134,10 +140,30 @@ main() {
   cd "$root"
 
   echo "[bootstrap-mvp] repo: $root"
+  echo "[bootstrap-mvp] python=$(python3 --version 2>/dev/null | tr -d '\n') termux=$is_termux"
+  echo "[bootstrap-mvp] requirements=backend/requirements.txt"
+
+  if [[ "$is_termux" == "1" ]]; then
+    if ! ensure_cmd rustc || ! ensure_cmd cargo; then
+      echo "[bootstrap-mvp] ERROR: rustc/cargo missing after dependency install." >&2
+      echo "Run: pkg install -y rust clang pkg-config" >&2
+      exit 1
+    fi
+    if [[ -z "${CARGO_BUILD_TARGET:-}" ]]; then
+      arch="$(uname -m || true)"
+      case "$arch" in
+        aarch64|arm64) export CARGO_BUILD_TARGET="aarch64-linux-android" ;;
+        armv7l|armv8l) export CARGO_BUILD_TARGET="armv7-linux-androideabi" ;;
+        x86_64|amd64) export CARGO_BUILD_TARGET="x86_64-linux-android" ;;
+      esac
+    fi
+  fi
+
   [[ -d .venv ]] || python3 -m venv .venv
   # shellcheck disable=SC1091
   source .venv/bin/activate
   python -m pip install --upgrade pip >/dev/null
+  pip install --upgrade setuptools wheel maturin >/dev/null
   pip install -r backend/requirements.txt >/dev/null
 
   if [[ "$USE_TMUX" == "1" ]] && ensure_cmd tmux; then
@@ -146,15 +172,26 @@ main() {
     start_without_tmux "$root"
   fi
 
-  sleep 2
-
   local health_url="http://127.0.0.1:${BACKEND_PORT}/health"
   local frontend_url="http://127.0.0.1:${FRONTEND_PORT}"
+  local ok=0
+  for _ in $(seq 1 40); do
+    if curl -fsS "$health_url" >/dev/null 2>&1; then
+      ok=1
+      break
+    fi
+    sleep 0.5
+  done
+
   echo ""
-  if curl -fsS "$health_url" >/dev/null 2>&1; then
+  if [[ "$ok" == "1" ]]; then
     echo "✅ Backend healthy: $health_url"
   else
     echo "⚠️ Backend still starting: $health_url"
+    if [[ -f "$root/.local/backend.log" ]]; then
+      echo "[bootstrap-mvp] tail backend log:"
+      tail -n 30 "$root/.local/backend.log" || true
+    fi
   fi
   echo "✅ Frontend: $frontend_url"
   echo "✅ Admin panel: $frontend_url/admin.html"
@@ -169,4 +206,3 @@ main() {
 }
 
 main "$@"
-
