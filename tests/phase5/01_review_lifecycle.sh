@@ -6,7 +6,11 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 echo "[phase5] review workflow lifecycle on $BASE_URL"
 
 SUFFIX="$(date +%s)-$RANDOM"
-CONTAINER="TSTU${SUFFIX:0:7}"
+CONTAINER="TSTU$(python3 - <<'PY'
+import random
+print(f"{random.SystemRandom().randrange(0, 10_000_000):07d}")
+PY
+)"
 
 submit_payload=$(cat <<JSON
 {
