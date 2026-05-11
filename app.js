@@ -473,6 +473,8 @@
     const filterEl = byId("adminQueueFilter");
     const refreshBtn = byId("adminRefresh");
     const detailWrap = byId("adminDetail");
+    const modalBackdrop = byId("adminModalBackdrop");
+    const modalCloseBtn = byId("adminModalClose");
     const selectedHint = byId("adminSelectedHint");
     const submissionIdEl = byId("adminSubmissionId");
     const submissionStatusEl = byId("adminSubmissionStatus");
@@ -494,6 +496,22 @@
     const forceMock = new URLSearchParams(window.location.search).get("mockdb") === "1";
     const isGitHubPages = /github\.io$/i.test(window.location.hostname || "");
     let useMockDb = forceMock;
+
+    function openDetailModal() {
+      selectedHint?.classList.add("hidden");
+      detailWrap?.classList.remove("hidden");
+      modalBackdrop?.classList.remove("hidden");
+      document.body.classList.add("modal-open");
+    }
+
+    function closeDetailModal() {
+      detailWrap?.classList.add("hidden");
+      modalBackdrop?.classList.add("hidden");
+      document.body.classList.remove("modal-open");
+      if (!selectedSubmissionId) {
+        selectedHint?.classList.remove("hidden");
+      }
+    }
 
     function nowIso() {
       return new Date().toISOString();
@@ -747,8 +765,7 @@
     async function loadSubmissionDetail(submissionId) {
       selectedSubmissionId = submissionId;
       setActionMessage("");
-      selectedHint.classList.add("hidden");
-      detailWrap.classList.remove("hidden");
+      openDetailModal();
 
       const out = await fetchJson(`/submission/${encodeURIComponent(submissionId)}`);
       selectedBundle = out;
@@ -803,6 +820,20 @@
         await loadSubmissionDetail(id);
       } catch (err) {
         setActionMessage(`Failed to load submission: ${err?.message || err}`, true);
+      }
+    });
+
+    modalCloseBtn?.addEventListener("click", () => {
+      closeDetailModal();
+    });
+
+    modalBackdrop?.addEventListener("click", () => {
+      closeDetailModal();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && detailWrap && !detailWrap.classList.contains("hidden")) {
+        closeDetailModal();
       }
     });
 
