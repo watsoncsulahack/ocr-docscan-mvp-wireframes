@@ -14,6 +14,7 @@ FRONTEND_PORT="${OCR_MVP_FRONTEND_PORT:-8080}"
 PROFILE="${OCR_MVP_PROFILE:-auto}"   # auto | phone | laptop
 LLM="${OCR_MVP_LLM:-auto}"           # auto | ollama | gemini | openai
 USE_TMUX="${OCR_MVP_USE_TMUX:-1}"    # 1 | 0
+GIT_UPDATE="${OCR_MVP_GIT_UPDATE:-1}" # 1 | 0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -25,6 +26,30 @@ fi
 
 ensure_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+update_repo_if_possible() {
+  local root="$1"
+  [[ "$GIT_UPDATE" == "1" ]] || return 0
+  [[ -d "$root/.git" ]] || return 0
+
+  echo "[bootstrap-mvp] updating repo at $root"
+
+  local upstream remote
+  upstream="$(git -C "$root" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  remote="${upstream%%/*}"
+
+  if [[ -z "$remote" ]] && git -C "$root" remote | grep -qx origin; then
+    remote="origin"
+  fi
+
+  if [[ -n "$remote" ]]; then
+    git -C "$root" fetch "$remote" --prune || true
+  fi
+
+  if ! git -C "$root" pull --ff-only; then
+    echo "[bootstrap-mvp] warning: git pull --ff-only failed (local changes or diverged branch). Continuing." >&2
+  fi
 }
 
 install_base_deps() {
@@ -84,10 +109,6 @@ resolve_repo_root() {
   if [[ ! -d "$REPO_DIR/.git" ]]; then
     echo "[bootstrap-mvp] cloning repo to $REPO_DIR"
     git clone "$REPO_URL" "$REPO_DIR"
-  else
-    echo "[bootstrap-mvp] updating existing repo at $REPO_DIR"
-    git -C "$REPO_DIR" fetch --all --prune
-    git -C "$REPO_DIR" pull --ff-only || true
   fi
   echo "$REPO_DIR"
 }
@@ -98,7 +119,7 @@ start_with_tmux() {
   tmux kill-session -t ocr-frontend 2>/dev/null || true
 
   tmux new-session -d -s ocr-backend \
-    "cd '$root' && source .venv/bin/activate && OCR_MVP_PROFILE='$PROFILE' OCR_MVP_LLM='$LLM' OCR_MVP_PORT='$BACKEND_PORT' OCR_MVP_VENV='$root/.venv' bash ./scripts/start_backend_local.sh"
+    "cd '$root' && source .venv/bin/activate && OCR_MVP_PROFILE='$PROFILE' OCR_MVP_LLM='$LLM' OCR_MVP_PORT='$BACKEND_PORT' OCR_MVP_VENV='$root/.venv' ANDROID_API_LEVEL='${ANDROID_API_LEVEL:-}' bash ./scripts/start_backend_local.sh"
 
   tmux new-session -d -s ocr-frontend \
     "cd '$root' && python3 -m http.server '$FRONTEND_PORT' --bind 127.0.0.1"
@@ -119,7 +140,7 @@ start_without_tmux() {
   (
     cd "$root"
     source .venv/bin/activate
-    OCR_MVP_PROFILE="$PROFILE" OCR_MVP_LLM="$LLM" OCR_MVP_PORT="$BACKEND_PORT" OCR_MVP_VENV="$root/.venv" \
+    OCR_MVP_PROFILE="$PROFILE" OCR_MVP_LLM="$LLM" OCR_MVP_PORT="$BACKEND_PORT" OCR_MVP_VENV="$root/.venv" ANDROID_API_LEVEL="${ANDROID_API_LEVEL:-}" \
       bash ./scripts/start_backend_local.sh
   ) >"$backend_log" 2>&1 &
   echo $! > "$backend_pid"
@@ -137,6 +158,7 @@ main() {
 
   local root
   root="$(resolve_repo_root)"
+  update_repo_if_possible "$root"
   cd "$root"
 
   echo "[bootstrap-mvp] repo: $root"
@@ -156,6 +178,17 @@ main() {
         armv7l|armv8l) export CARGO_BUILD_TARGET="armv7-linux-androideabi" ;;
         x86_64|amd64) export CARGO_BUILD_TARGET="x86_64-linux-android" ;;
       esac
+    fi
+
+    # maturin (used by pydantic-core builds) may need explicit Android API level.
+    if [[ -z "${ANDROID_API_LEVEL:-}" ]] && ensure_cmd getprop; then
+      api_level="$(getprop ro.build.version.sdk 2>/dev/null || true)"
+      if [[ "$api_level" =~ ^[0-9]+$ ]]; then
+        export ANDROID_API_LEVEL="$api_level"
+      fi
+    fi
+    if [[ -n "${ANDROID_API_LEVEL:-}" ]]; then
+      echo "[bootstrap-mvp] ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
     fi
   fi
 
@@ -194,8 +227,10 @@ main() {
     fi
   fi
   echo "✅ Frontend: $frontend_url"
+  echo "✅ Frontend (localhost): http://localhost:${FRONTEND_PORT}"
   echo "✅ Admin panel: $frontend_url/admin.html"
   echo "✅ Admin panel (mock DB): $frontend_url/admin.html?mockdb=1"
+  echo "🛑 Stop servers: bash ./scripts/stop_mvp.sh"
 
   if [[ "$USE_TMUX" == "1" ]] && ensure_cmd tmux; then
     echo ""

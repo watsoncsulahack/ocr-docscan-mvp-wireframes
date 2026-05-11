@@ -60,6 +60,13 @@ if [[ "$is_termux" == "1" ]]; then
       x86_64|amd64) export CARGO_BUILD_TARGET="x86_64-linux-android" ;;
     esac
   fi
+
+  if [[ -z "${ANDROID_API_LEVEL:-}" ]] && command -v getprop >/dev/null 2>&1; then
+    api_level="$(getprop ro.build.version.sdk 2>/dev/null || true)"
+    if [[ "$api_level" =~ ^[0-9]+$ ]]; then
+      export ANDROID_API_LEVEL="$api_level"
+    fi
+  fi
 fi
 
 calc_requirements_hash() {
