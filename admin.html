@@ -75,6 +75,11 @@
 
       <p class="note"><strong>ID:</strong> <span id="adminSubmissionId"></span> · <strong>Status:</strong> <span id="adminSubmissionStatus"></span></p>
 
+      <div id="adminSourcePreviewWrap" class="admin-preview-wrap hidden" style="margin-top:10px;">
+        <p class="field-help" style="margin:0 0 6px 0;">Uploaded source image</p>
+        <img id="adminSourcePreview" class="preview" alt="Uploaded source preview" />
+      </div>
+
       <div id="adminRuleResults" class="note"></div>
 
       <div id="adminFieldEditor" class="review-form" style="margin-top:10px;"></div>
@@ -89,7 +94,7 @@
         <textarea id="adminNote" class="input" rows="3" placeholder="Optional note for review/approval"></textarea>
       </label>
 
-      <label style="display:block; margin-top:10px;">
+      <label id="adminRejectWrap" class="hidden" style="display:block; margin-top:10px;">
         <span class="field-help">Reject reason</span>
         <input id="adminRejectReason" class="input" type="text" placeholder="Required only when rejecting" />
       </label>
@@ -98,6 +103,7 @@
         <button id="adminSaveReview" class="btn secondary" type="button">Save Review Edits</button>
         <button id="adminApprove" class="btn" type="button">Approve</button>
         <button id="adminReject" class="btn secondary" type="button">Reject</button>
+        <button id="adminRejectCancel" class="btn secondary hidden" type="button">Cancel</button>
       </div>
 
       <div id="adminActionMsg" class="note" style="margin-top:10px;"></div>

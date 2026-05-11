@@ -14,6 +14,7 @@ from urllib import request as url_request
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 try:
@@ -1121,6 +1122,8 @@ async def scan(file: UploadFile = File(...)):
 
     submission_id = str(uuid.uuid4())
     now = now_iso()
+    temp_name = f"{file_sha256[:12]}_{filename}"
+    temp_path = UPLOAD_DIR / temp_name
 
     conn = db_connect()
     prior_same_hash = conn.execute(
@@ -1163,7 +1166,7 @@ async def scan(file: UploadFile = File(...)):
             source_file_name,
             file_type,
             file_sha256,
-            None,
+            temp_name,
             now,
         ),
     )
@@ -1171,8 +1174,6 @@ async def scan(file: UploadFile = File(...)):
     conn.commit()
     conn.close()
 
-    temp_name = f"{file_sha256[:12]}_{filename}"
-    temp_path = UPLOAD_DIR / temp_name
     temp_path.write_bytes(raw)
 
     pipeline_notes: List[str] = []
@@ -1629,6 +1630,32 @@ def normalize_file_type(value: str) -> str:
     return (value or "").strip().lower().replace(".", "")
 
 
+def mime_for_file_type(file_type: str) -> str:
+    ft = normalize_file_type(file_type)
+    return {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+        "tiff": "image/tiff",
+        "pdf": "application/pdf",
+    }.get(ft, "application/octet-stream")
+
+
+def resolve_submission_storage_name(storage_path: Optional[str], file_sha256: Optional[str], original_filename: Optional[str]) -> Optional[str]:
+    if storage_path:
+        direct = Path(str(storage_path)).name
+        if (UPLOAD_DIR / direct).exists():
+            return direct
+    if file_sha256 and original_filename:
+        fallback = f"{str(file_sha256)[:12]}_{Path(str(original_filename)).name}"
+        if (UPLOAD_DIR / fallback).exists():
+            return fallback
+    return None
+
+
 def normalize_classifier(value: str) -> str:
     text = (value or "other").strip().lower()
     return text if text in SUPPORTED_CLASSIFIERS else "other"
@@ -1752,15 +1779,29 @@ def fetch_submission_bundle(submission_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     extraction = conn.execute("SELECT * FROM extraction_results WHERE submission_id = ? ORDER BY created_at DESC LIMIT 1", (submission_id,)).fetchone()
+    doc_file = conn.execute(
+        "SELECT original_filename, file_type, file_sha256, storage_path, created_at FROM document_files WHERE submission_id = ? ORDER BY created_at DESC LIMIT 1",
+        (submission_id,),
+    ).fetchone()
     fields = conn.execute("SELECT field_name, field_value, confidence, is_required, source FROM extracted_fields WHERE submission_id = ?", (submission_id,)).fetchall()
     reviews = conn.execute("SELECT * FROM review_tasks WHERE submission_id = ? ORDER BY created_at DESC", (submission_id,)).fetchall()
     verified = conn.execute("SELECT * FROM verified_records WHERE submission_id = ? ORDER BY approved_at DESC LIMIT 1", (submission_id,)).fetchone()
     audit = conn.execute("SELECT * FROM audit_logs WHERE submission_id = ? ORDER BY created_at DESC", (submission_id,)).fetchall()
     conn.close()
 
+    resolved_storage_name = None
+    if doc_file:
+        resolved_storage_name = resolve_submission_storage_name(
+            doc_file["storage_path"],
+            doc_file["file_sha256"],
+            doc_file["original_filename"],
+        )
+
     return {
         "submission": dict(sub),
         "extractionResult": dict(extraction) if extraction else None,
+        "documentFile": dict(doc_file) if doc_file else None,
+        "previewUrl": f"/submission/{submission_id}/file" if resolved_storage_name else None,
         "extractedFields": [dict(f) for f in fields],
         "reviewTasks": [dict(r) for r in reviews],
         "verifiedRecord": dict(verified) if verified else None,
@@ -1885,6 +1926,22 @@ def submit_document(payload: SubmissionIn):
             ),
         )
 
+    storage_path = None
+    if payload.fileContentBase64:
+        try:
+            raw = base64.b64decode(payload.fileContentBase64)
+            if raw and len(raw) <= MAX_FILE_BYTES:
+                ext = normalize_file_type(file_type)
+                if ext == "jpeg":
+                    ext = "jpg"
+                if ext not in SUPPORTED_FILE_TYPES:
+                    ext = "bin"
+                storage_name = f"{file_sha256[:12]}_{submission_id}.{ext}"
+                (UPLOAD_DIR / storage_name).write_bytes(raw)
+                storage_path = storage_name
+        except Exception:
+            storage_path = None
+
     doc_file_id = str(uuid.uuid4())
     conn.execute(
         "INSERT INTO document_files(id, submission_id, original_filename, source_file_name, file_type, file_sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1895,7 +1952,7 @@ def submit_document(payload: SubmissionIn):
             source_file_name,
             file_type,
             file_sha256,
-            None,
+            storage_path,
             now,
         ),
     )
@@ -1979,6 +2036,41 @@ def get_submission(submission_id: str):
     if not data:
         raise HTTPException(status_code=404, detail="Submission not found")
     return {"ok": True, **data}
+
+
+@app.get("/submission/{submission_id}/file")
+def get_submission_file(submission_id: str):
+    conn = db_connect()
+    row = conn.execute(
+        "SELECT original_filename, file_type, file_sha256, storage_path FROM document_files WHERE submission_id = ? ORDER BY created_at DESC LIMIT 1",
+        (submission_id,),
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Submission file not found")
+
+    resolved_name = resolve_submission_storage_name(
+        row["storage_path"],
+        row["file_sha256"],
+        row["original_filename"],
+    )
+    if not resolved_name:
+        raise HTTPException(status_code=404, detail="Submission file not found")
+
+    file_path = (UPLOAD_DIR / resolved_name).resolve()
+    upload_root = UPLOAD_DIR.resolve()
+
+    if upload_root not in file_path.parents and file_path != upload_root:
+        raise HTTPException(status_code=400, detail="Invalid submission file path")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Submission file missing on disk")
+
+    return FileResponse(
+        str(file_path),
+        media_type=mime_for_file_type(row["file_type"]),
+        filename=(row["original_filename"] or file_path.name),
+    )
 
 
 @app.get("/submissions")

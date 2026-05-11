@@ -161,6 +161,12 @@ body {
   border-color: #3a4554;
 }
 
+.btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
 .progress-stack {
   display: grid;
   gap: 8px;
@@ -283,4 +289,10 @@ body.modal-open .page {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.admin-preview-wrap .preview {
+  max-height: 260px;
+  object-fit: contain;
+  background: #0b1118;
 }

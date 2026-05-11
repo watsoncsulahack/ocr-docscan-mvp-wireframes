@@ -475,6 +475,8 @@
     const detailWrap = byId("adminDetail");
     const modalBackdrop = byId("adminModalBackdrop");
     const modalCloseBtn = byId("adminModalClose");
+    const sourcePreviewWrap = byId("adminSourcePreviewWrap");
+    const sourcePreviewImg = byId("adminSourcePreview");
     const selectedHint = byId("adminSelectedHint");
     const submissionIdEl = byId("adminSubmissionId");
     const submissionStatusEl = byId("adminSubmissionStatus");
@@ -482,17 +484,20 @@
     const fieldEditorEl = byId("adminFieldEditor");
     const actorEl = byId("adminActor");
     const noteEl = byId("adminNote");
+    const rejectWrapEl = byId("adminRejectWrap");
     const rejectReasonEl = byId("adminRejectReason");
     const actionMsgEl = byId("adminActionMsg");
     const saveReviewBtn = byId("adminSaveReview");
     const approveBtn = byId("adminApprove");
     const rejectBtn = byId("adminReject");
+    const rejectCancelBtn = byId("adminRejectCancel");
     const auditListEl = byId("adminAuditList");
 
     if (!queueBody || !filterEl) return;
 
     let selectedSubmissionId = null;
     let selectedBundle = null;
+    let rejectConfirmArmed = false;
     const forceMock = new URLSearchParams(window.location.search).get("mockdb") === "1";
     const isGitHubPages = /github\.io$/i.test(window.location.hostname || "");
     let useMockDb = forceMock;
@@ -508,8 +513,26 @@
       detailWrap?.classList.add("hidden");
       modalBackdrop?.classList.add("hidden");
       document.body.classList.remove("modal-open");
+      setRejectMode(false);
       if (!selectedSubmissionId) {
         selectedHint?.classList.remove("hidden");
+      }
+    }
+
+    function setRejectMode(on) {
+      rejectConfirmArmed = !!on;
+      if (rejectWrapEl) {
+        rejectWrapEl.classList.toggle("hidden", !rejectConfirmArmed);
+      }
+      if (rejectCancelBtn) {
+        rejectCancelBtn.classList.toggle("hidden", !rejectConfirmArmed);
+      }
+      if (rejectBtn) {
+        rejectBtn.classList.toggle("danger", rejectConfirmArmed);
+        rejectBtn.textContent = rejectConfirmArmed ? "Confirm Reject" : "Reject";
+      }
+      if (!rejectConfirmArmed && rejectReasonEl) {
+        rejectReasonEl.value = "";
       }
     }
 
@@ -679,7 +702,11 @@
           throw new Error(text || `HTTP ${res.status}`);
         }
         try {
-          return JSON.parse(text);
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === "object") {
+            parsed.__backendBase = backend;
+          }
+          return parsed;
         } catch {
           throw new Error(`Invalid JSON response for ${path}`);
         }
@@ -762,9 +789,29 @@
       ruleResultsEl.textContent = `Review task: ${latest.status || "-"} · reason=${latest.reason_code || "-"} · assigned_to=${latest.assigned_to || "-"}`;
     }
 
+    function renderSourcePreview(bundle) {
+      if (!sourcePreviewWrap || !sourcePreviewImg) return;
+
+      const directDataUrl = bundle?.previewDataUrl || "";
+      const backendBase = bundle?.__backendBase || "";
+      const previewPath = bundle?.previewUrl || "";
+      const backendPreviewUrl = previewPath && previewPath.startsWith("/") ? `${backendBase}${previewPath}` : previewPath;
+      const imageSrc = directDataUrl || backendPreviewUrl;
+
+      if (!imageSrc) {
+        sourcePreviewWrap.classList.add("hidden");
+        sourcePreviewImg.removeAttribute("src");
+        return;
+      }
+
+      sourcePreviewImg.src = imageSrc;
+      sourcePreviewWrap.classList.remove("hidden");
+    }
+
     async function loadSubmissionDetail(submissionId) {
       selectedSubmissionId = submissionId;
       setActionMessage("");
+      setRejectMode(false);
       openDetailModal();
 
       const out = await fetchJson(`/submission/${encodeURIComponent(submissionId)}`);
@@ -772,6 +819,7 @@
 
       submissionIdEl.textContent = out?.submission?.id || submissionId;
       submissionStatusEl.textContent = out?.submission?.status || "-";
+      renderSourcePreview(out);
       renderRuleSummary(out);
       renderFieldEditor(out);
       renderAudit(out?.audit || []);
@@ -831,6 +879,12 @@
       closeDetailModal();
     });
 
+    detailWrap?.addEventListener("click", (e) => {
+      if (e.target === detailWrap) {
+        closeDetailModal();
+      }
+    });
+
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && detailWrap && !detailWrap.classList.contains("hidden")) {
         closeDetailModal();
@@ -880,6 +934,7 @@
     approveBtn?.addEventListener("click", async () => {
       if (!selectedSubmissionId) return;
       try {
+        setRejectMode(false);
         const verifiedFields = getEditableFieldsFromUI();
         const out = await fetchJson(`/approve/${encodeURIComponent(selectedSubmissionId)}`, {
           method: "POST",
@@ -900,6 +955,13 @@
 
     rejectBtn?.addEventListener("click", async () => {
       if (!selectedSubmissionId) return;
+
+      if (!rejectConfirmArmed) {
+        setRejectMode(true);
+        setActionMessage("Provide a reject reason, then click Confirm Reject.");
+        return;
+      }
+
       const reason = (rejectReasonEl?.value || "").trim();
       if (!reason) {
         setActionMessage("Reject reason is required.", true);
@@ -915,11 +977,17 @@
           }),
         });
         setActionMessage(`Rejected submission. Status: ${out.status}`);
+        setRejectMode(false);
         await loadQueue();
         await loadSubmissionDetail(selectedSubmissionId);
       } catch (err) {
         setActionMessage(`Reject failed: ${err?.message || err}`, true);
       }
+    });
+
+    rejectCancelBtn?.addEventListener("click", () => {
+      setRejectMode(false);
+      setActionMessage("");
     });
 
     try {
