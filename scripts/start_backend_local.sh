@@ -9,7 +9,8 @@ PID_FILE="${OCR_MVP_PID:-/tmp/ocr-docscan-backend.pid}"
 RUNTIME_DIR="$ROOT_DIR/data/runtime"
 LOCAL_URL_FILE="$RUNTIME_DIR/local_backend_url.txt"
 
-REQ_BASE="$ROOT_DIR/backend/requirements.txt"
+REQ_BASE_DEFAULT="$ROOT_DIR/backend/requirements.txt"
+REQ_BASE="${OCR_MVP_REQUIREMENTS_FILE:-$REQ_BASE_DEFAULT}"
 REQ_LOCAL_OCR="$ROOT_DIR/backend/requirements-optional-local-ocr.txt"
 REQ_DOCTR="$ROOT_DIR/backend/requirements-optional-doctr.txt"
 REQ_MARKER="$VENV_DIR/.requirements.sha256"
@@ -26,12 +27,46 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+is_termux=0
+if [[ "${OCR_MVP_FORCE_TERMUX:-0}" == "1" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]] || [[ -d "/data/data/com.termux" ]]; then
+  is_termux=1
+fi
+
 mkdir -p "$(dirname "$LOG")"
 mkdir -p "$RUNTIME_DIR"
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "[ocr-mvp] creating venv: $VENV_DIR"
   python3 -m venv "$VENV_DIR"
+fi
+
+if [[ "$is_termux" == "1" ]]; then
+  if ! command -v rustc >/dev/null 2>&1 || ! command -v cargo >/dev/null 2>&1; then
+    if command -v pkg >/dev/null 2>&1; then
+      echo "[ocr-mvp] installing Termux Rust toolchain (required for pydantic-core)"
+      pkg install -y rust clang pkg-config
+    fi
+  fi
+  if ! command -v rustc >/dev/null 2>&1 || ! command -v cargo >/dev/null 2>&1; then
+    echo "[ocr-mvp] ERROR: rustc/cargo missing. Run: pkg install -y rust clang pkg-config" >&2
+    exit 1
+  fi
+
+  if [[ -z "${CARGO_BUILD_TARGET:-}" ]]; then
+    arch="$(uname -m || true)"
+    case "$arch" in
+      aarch64|arm64) export CARGO_BUILD_TARGET="aarch64-linux-android" ;;
+      armv7l|armv8l) export CARGO_BUILD_TARGET="armv7-linux-androideabi" ;;
+      x86_64|amd64) export CARGO_BUILD_TARGET="x86_64-linux-android" ;;
+    esac
+  fi
+
+  if [[ -z "${ANDROID_API_LEVEL:-}" ]] && command -v getprop >/dev/null 2>&1; then
+    api_level="$(getprop ro.build.version.sdk 2>/dev/null || true)"
+    if [[ "$api_level" =~ ^[0-9]+$ ]]; then
+      export ANDROID_API_LEVEL="$api_level"
+    fi
+  fi
 fi
 
 calc_requirements_hash() {
@@ -64,8 +99,16 @@ if [[ "$SKIP_INSTALL" != "1" ]]; then
   fi
 
   if [[ "$need_install" == "1" ]]; then
-    echo "[ocr-mvp] installing dependencies"
-    PIP_NO_CACHE_DIR=1 "$VENV_DIR/bin/pip" install --disable-pip-version-check -r "$REQ_BASE"
+    echo "[ocr-mvp] installing dependencies from: $REQ_BASE"
+    PIP_NO_CACHE_DIR=1 "$VENV_DIR/bin/pip" install --disable-pip-version-check --upgrade pip setuptools wheel maturin
+    if ! PIP_NO_CACHE_DIR=1 "$VENV_DIR/bin/pip" install --disable-pip-version-check -r "$REQ_BASE"; then
+      echo "[ocr-mvp] dependency install failed." >&2
+      if [[ "$is_termux" == "1" ]]; then
+        echo "[ocr-mvp] Termux hint: ensure rust toolchain is installed: pkg install -y rust clang pkg-config" >&2
+        echo "[ocr-mvp] Termux hint: if this is Py3.13, keep CARGO_BUILD_TARGET set to android target." >&2
+      fi
+      exit 1
+    fi
     if [[ "$INSTALL_LOCAL_OCR" == "1" ]] && [[ -f "$REQ_LOCAL_OCR" ]]; then
       echo "[ocr-mvp] installing optional local OCR deps"
       PIP_NO_CACHE_DIR=1 "$VENV_DIR/bin/pip" install --disable-pip-version-check -r "$REQ_LOCAL_OCR"

@@ -29,6 +29,59 @@ This repo now includes:
 
 ## Run locally
 
+### Universal bootstrap (single entrypoint)
+
+Use one script on Android/Termux or regular Linux/macOS devices:
+
+```bash
+bash ./scripts/bootstrap_mvp.sh
+```
+
+Optional env knobs:
+
+```bash
+OCR_MVP_PROFILE=phone OCR_MVP_LLM=gemini bash ./scripts/bootstrap_mvp.sh
+OCR_MVP_BACKEND_PORT=8010 OCR_MVP_FRONTEND_PORT=8080 bash ./scripts/bootstrap_mvp.sh
+```
+
+What it does:
+- installs/verifies base dependencies
+- clones/updates repo when run outside repo
+- creates/uses `.venv` and installs `backend/requirements.txt`
+- launches backend + frontend (tmux sessions when available)
+- prints MVP + admin URLs
+
+Termux note:
+- On Termux, bootstrap installs Rust/clang/pkg-config and uses the same
+  dependency set as other platforms, so `pydantic-core` can compile when
+  wheels are unavailable.
+
+### Vanilla Android (Termux + tmux) one-shot bootstrap
+
+On a fresh Android test device (Termux):
+
+```bash
+bash ./scripts/bootstrap_android_tmux.sh
+```
+
+This is a compatibility wrapper around `bootstrap_mvp.sh` with Android-friendly defaults.
+
+This script will:
+- install required Termux packages (`git`, `python`, `tmux`, `curl`)
+- clone or update the repo
+- create `.venv` + install Python deps
+- start backend in tmux session `ocr-backend`
+- start frontend in tmux session `ocr-frontend`
+- print working URLs and health status
+
+Useful tmux commands:
+
+```bash
+tmux attach -t ocr-backend
+tmux attach -t ocr-frontend
+tmux ls
+```
+
 ### 1) Backend
 
 ```bash
@@ -41,7 +94,7 @@ pip install -r backend/requirements.txt
 # pip install -r backend/requirements-optional-doctr.txt
 # OCR binary required only for local Tesseract mode:
 # Ubuntu/Debian: sudo apt-get install -y tesseract-ocr
-uvicorn backend.main:app --reload --port 8010
+uvicorn backend.main:app --reload --port 8000
 ```
 
 ### 2) Frontend
@@ -52,12 +105,74 @@ python3 -m http.server 8080
 
 Open:
 - Frontend: `http://127.0.0.1:8080`
-- Backend health: `http://127.0.0.1:8010/health`
+- Backend health: `http://127.0.0.1:8000/health`
+
+### Admin panel (separate launcher)
+
+Run the admin panel on its own local port (defaults to `8091`) with `admin.html` as the default route:
+
+```bash
+bash ./scripts/start_admin_panel.sh
+```
+
+Open:
+- `http://127.0.0.1:8091/`
+
+Optional custom port:
+
+```bash
+ADMIN_PANEL_PORT=8119 bash ./scripts/start_admin_panel.sh
+```
+
+### Admin panel on GitHub Pages (with fake DB)
+
+`admin.html` now supports a built-in mock database fallback for static hosting.
+
+- On `github.io`, if local backend is unreachable, it auto-switches to mock DB.
+- You can force mock mode anywhere with `?mockdb=1`.
+
+Example:
+
+```text
+https://<your-user>.github.io/ocr-docscan-mvp-wireframes/admin.html?mockdb=1
+```
+
+This keeps the UI looking and behaving like a real review queue (open/review/approve/reject) while persisting fake state in browser `localStorage`.
 
 ## GitHub Pages + Backend Wiring
 
 - Frontend reads backend URL from `config.js` (`window.OCR_BACKEND_URL`)
 - You can override at runtime from the index page and save in localStorage.
+- GitHub Pages deployment workflow: `.github/workflows/deploy-pages.yml` (push to `main` or `sprint3/phase0-baseline-local-first`)
+
+## One project, multi-platform (phone + laptop)
+
+Use one wrapper script for both devices:
+
+```bash
+# Local backend only
+bash ./scripts/run_dev.sh up
+
+# Local backend + public tunnel
+bash ./scripts/run_dev.sh share
+
+# Stop tunnel + backend
+bash ./scripts/run_dev.sh down
+```
+
+Optional profile and LLM mode knobs:
+
+```bash
+OCR_MVP_PROFILE=phone  bash ./scripts/run_dev.sh up
+OCR_MVP_PROFILE=laptop bash ./scripts/run_dev.sh up
+OCR_MVP_LLM=ollama     bash ./scripts/run_dev.sh up
+OCR_MVP_LOCAL_OCR=1    bash ./scripts/run_dev.sh up
+```
+
+Notes:
+- `OCR_MVP_PROFILE=auto` (default) auto-detects phone vs laptop.
+- `OCR_MVP_LLM=ollama` maps to OpenAI-compatible mode with default `LLM_BASE_URL=http://127.0.0.1:11434/v1`.
+- Keep the same repo and scripts on both platforms; only env/profile changes.
 
 ## No-account sharing mode (free)
 
