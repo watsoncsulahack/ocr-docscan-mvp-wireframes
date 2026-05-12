@@ -54,7 +54,6 @@ What it does:
 - starts local Ollama (managed) + pulls model via `scripts/ollama_local.sh`
 - launches backend + frontend (tmux sessions when available)
 - prints MVP + admin URLs
-- includes local Ollama GUI page at `ollama.html`
 
 Termux note:
 - On Termux, bootstrap installs Rust/clang/pkg-config and uses the same
@@ -193,8 +192,9 @@ Useful env knobs:
 - `OCR_MVP_OLLAMA_AUTO_PULL=1|0`
 - `OCR_MVP_OLLAMA_INSTALL=1` (attempt auto-install via official script if ollama is missing)
 
-Ollama web GUI:
-- `http://127.0.0.1:8080/ollama.html` (or your configured frontend port)
+Notes:
+- On Linux/server installs, Ollama exposes an API + CLI (`ollama list`, `ollama pull`, `ollama run`), not a bundled web GUI.
+- The desktop Ollama app provides its own UI on supported desktop platforms.
 
 ## No-account sharing mode (free)
 

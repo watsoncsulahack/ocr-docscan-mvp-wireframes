@@ -336,7 +336,7 @@ main() {
   echo "✅ Frontend: $frontend_url"
   echo "✅ Admin panel: $frontend_url/admin.html"
   if [[ "$START_OLLAMA" == "1" ]]; then
-    echo "✅ Ollama GUI: $frontend_url/ollama.html"
+    echo "✅ Ollama API: http://127.0.0.1:${OCR_MVP_OLLAMA_PORT:-11434}"
   fi
 
   echo "To stop the above servers, run this script:"

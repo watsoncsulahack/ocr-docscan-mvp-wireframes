@@ -701,6 +701,7 @@
         if (!res.ok) {
           throw new Error(text || `HTTP ${res.status}`);
         }
+        setBackendStatus(true);
         try {
           const parsed = JSON.parse(text);
           if (parsed && typeof parsed === "object") {
@@ -711,6 +712,7 @@
           throw new Error(`Invalid JSON response for ${path}`);
         }
       } catch (err) {
+        setBackendStatus(false);
         if (isGitHubPages || forceMock) {
           useMockDb = true;
           setMockStatus();
@@ -841,7 +843,17 @@
       const rows = Array.isArray(out?.submissions) ? out.submissions : [];
       if (!rows.length) {
         queueBody.innerHTML = '<tr><td colspan="6">No submissions in this queue.</td></tr>';
-        return;
+        selectedSubmissionId = null;
+        selectedBundle = null;
+        closeDetailModal();
+        return rows;
+      }
+
+      const stillPresent = selectedSubmissionId && rows.some((r) => r?.id === selectedSubmissionId);
+      if (!stillPresent) {
+        selectedSubmissionId = null;
+        selectedBundle = null;
+        closeDetailModal();
       }
 
       queueBody.innerHTML = "";
@@ -857,6 +869,8 @@
         `;
         queueBody.appendChild(tr);
       });
+
+      return rows;
     }
 
     queueBody.addEventListener("click", async (e) => {
@@ -901,8 +915,8 @@
 
     refreshBtn?.addEventListener("click", async () => {
       try {
-        await loadQueue();
-        if (selectedSubmissionId) {
+        const rows = await loadQueue();
+        if (selectedSubmissionId && Array.isArray(rows) && rows.some((r) => r?.id === selectedSubmissionId)) {
           await loadSubmissionDetail(selectedSubmissionId);
         }
       } catch (err) {
@@ -992,6 +1006,7 @@
 
     try {
       if (forceMock) setMockStatus();
+      await probeBackendStatus();
       await loadQueue();
     } catch (err) {
       queueBody.innerHTML = `<tr><td colspan="6">Failed to load queue: ${err?.message || err}</td></tr>`;
