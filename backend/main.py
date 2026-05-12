@@ -502,12 +502,53 @@ def extract_container_candidates(raw_text: str) -> List[str]:
 
 
 def extract_date_candidates(raw_text: str) -> List[str]:
+    text = raw_text or ""
     out: List[str] = []
     seen = set()
-    for d in DATE_RE.findall(raw_text or ""):
-        if d not in seen and valid_date(d):
-            out.append(d)
-            seen.add(d)
+
+    def add_if_valid(value: str) -> None:
+        if not value:
+            return
+        if valid_date(value) and value not in seen:
+            seen.add(value)
+            out.append(value)
+
+    # Existing strict MM/DD/YYYY matches.
+    for d in DATE_RE.findall(text):
+        add_if_valid(d)
+
+    # ISO-like patterns: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+    for y, m, d in re.findall(r"\b(20\d{2}|19\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b", text):
+        add_if_valid(f"{int(m):02d}/{int(d):02d}/{int(y):04d}")
+
+    # Slash/dash separated patterns where day/month may be swapped.
+    for a, b, y in re.findall(r"\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2}|19\d{2})\b", text):
+        ai, bi = int(a), int(b)
+        # Prefer MM/DD/YYYY unless impossible; fallback to DD/MM/YYYY conversion.
+        if ai <= 12:
+            add_if_valid(f"{ai:02d}/{bi:02d}/{int(y):04d}")
+        else:
+            add_if_valid(f"{bi:02d}/{ai:02d}/{int(y):04d}")
+
+    # Month-name patterns: Jan 2 2026 / 2 Jan 2026 / January 2, 2026
+    month_name_pattern = r"(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)"
+    for token in re.findall(rf"\b{month_name_pattern}\s+\d{{1,2}},?\s+(?:20\d{{2}}|19\d{{2}})\b", text, flags=re.I):
+        for fmt in ("%b %d %Y", "%B %d %Y"):
+            try:
+                dtv = dt.datetime.strptime(token.replace(",", ""), fmt)
+                add_if_valid(dtv.strftime("%m/%d/%Y"))
+                break
+            except Exception:
+                continue
+    for token in re.findall(rf"\b\d{{1,2}}\s+{month_name_pattern}\s+(?:20\d{{2}}|19\d{{2}})\b", text, flags=re.I):
+        for fmt in ("%d %b %Y", "%d %B %Y"):
+            try:
+                dtv = dt.datetime.strptime(token, fmt)
+                add_if_valid(dtv.strftime("%m/%d/%Y"))
+                break
+            except Exception:
+                continue
+
     return out
 
 
@@ -1345,7 +1386,7 @@ async def scan(file: UploadFile = File(...)):
 
     llm_date = (llm_structured or {}).get("date") or ""
     if dates:
-        extracted_date = llm_date if llm_date in dates else dates[0]
+        extracted_date = llm_date if valid_date(llm_date) else dates[0]
     else:
         extracted_date = exif_capture_date or dt.datetime.now().strftime("%m/%d/%Y")
 
