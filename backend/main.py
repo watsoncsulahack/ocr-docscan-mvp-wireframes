@@ -1238,7 +1238,9 @@ async def scan(file: UploadFile = File(...)):
 
     exif_capture_date = extract_exif_capture_date_from_raw(raw) if is_image else None
 
-    if is_image and env_bool("DIRECT_IMAGE_TO_LLM", "0"):
+    # Fast image-direct mode bypasses OCR text and sends only image to LLM.
+    # Default behavior keeps OCR text + image together for cross-checking.
+    if is_image and env_bool("DIRECT_IMAGE_TO_LLM", "0") and not env_bool("LLM_REQUIRE_OCR_AND_IMAGE", "1"):
         pipeline_notes.append("llm_direct_image_mode")
 
         llm_structured, llm_error = llm_postprocess(

@@ -297,6 +297,8 @@ Control panel is separated from the GitHub Pages MVP UI:
 - `ENABLE_LLM_POSTPROCESS=1` (default)
 - `LLM_BASE_URL=http://127.0.0.1:18084`
 - `LLM_MODEL=<optional>`
+- `LLM_REQUIRE_OCR_AND_IMAGE=1` (default): feed OCR text + image together to LLM for cross-checking
+- `DIRECT_IMAGE_TO_LLM=1` only takes effect when `LLM_REQUIRE_OCR_AND_IMAGE=0`
 
 ### Optional local OCR extras
 
