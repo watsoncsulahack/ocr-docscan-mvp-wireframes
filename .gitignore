@@ -12,3 +12,4 @@ backend/__pycache__/
 # Local env
 .venv/
 .env
+.local/
