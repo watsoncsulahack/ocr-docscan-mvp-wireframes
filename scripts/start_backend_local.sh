@@ -8,7 +8,8 @@ LOG="${OCR_MVP_LOG:-/tmp/ocr-docscan-backend.log}"
 PID_FILE="${OCR_MVP_PID:-/tmp/ocr-docscan-backend.pid}"
 RUNTIME_DIR="$ROOT_DIR/data/runtime"
 LOCAL_URL_FILE="$RUNTIME_DIR/local_backend_url.txt"
-DB_PATH="$ROOT_DIR/data/records.sqlite"
+DEFAULT_DB_PATH="$ROOT_DIR/data/records.sqlite"
+ACTIVE_DB_FILE="$RUNTIME_DIR/active_db_path.txt"
 
 REQ_BASE_DEFAULT="$ROOT_DIR/backend/requirements.txt"
 REQ_BASE="${OCR_MVP_REQUIREMENTS_FILE:-$REQ_BASE_DEFAULT}"
@@ -57,10 +58,18 @@ fi
 mkdir -p "$(dirname "$LOG")"
 mkdir -p "$RUNTIME_DIR"
 
-if [[ "$CLEAN_DB" == "1" ]] && [[ -f "$DB_PATH" ]]; then
-  echo "[ocr-mvp] clean DB requested; removing $DB_PATH"
-  rm -f "$DB_PATH"
+if [[ "$CLEAN_DB" == "1" ]]; then
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  CLEAN_DB_PATH="${OCR_MVP_CLEAN_DB_PATH:-$RUNTIME_DIR/records.clean.${stamp}.sqlite}"
+  mkdir -p "$(dirname "$CLEAN_DB_PATH")"
+  rm -f "$CLEAN_DB_PATH"
+  export OCR_MVP_DB_PATH="$CLEAN_DB_PATH"
+  echo "[ocr-mvp] clean DB requested; using disposable DB: $OCR_MVP_DB_PATH"
+else
+  export OCR_MVP_DB_PATH="${OCR_MVP_DB_PATH:-$DEFAULT_DB_PATH}"
 fi
+
+echo "$OCR_MVP_DB_PATH" > "$ACTIVE_DB_FILE"
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "[ocr-mvp] creating venv: $VENV_DIR"

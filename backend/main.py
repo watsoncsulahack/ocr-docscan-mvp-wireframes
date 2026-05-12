@@ -53,7 +53,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 UPLOAD_DIR = ROOT / "uploads"
 RUNTIME_DIR = DATA_DIR / "runtime"
-DB_PATH = DATA_DIR / "records.sqlite"
+DB_PATH = Path(os.getenv("OCR_MVP_DB_PATH", str(DATA_DIR / "records.sqlite")))
 LOCAL_BACKEND_URL_PATH = RUNTIME_DIR / "local_backend_url.txt"
 PUBLIC_BACKEND_URL_PATH = RUNTIME_DIR / "public_backend_url.txt"
 PUBLIC_BACKEND_META_PATH = RUNTIME_DIR / "public_backend_url.meta"
@@ -62,6 +62,7 @@ TUNNEL_LOG_PATH = Path(os.getenv("OCR_MVP_TUNNEL_LOG", "/tmp/ocr-docscan-tunnel.
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 APP_ORIGINS = [
     "https://watsoncsulahack.github.io",

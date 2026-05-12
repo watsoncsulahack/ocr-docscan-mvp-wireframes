@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ollama Local GUI - OCR MVP</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="page">
+    <section class="card">
+      <div class="topbar">
+        <h2 class="h2">Ollama Local GUI</h2>
+        <span id="ollamaStatus" class="status-chip">Checking...</span>
+      </div>
+      <div class="hr"></div>
+
+      <label>
+        <span class="field-help">Ollama API URL</span>
+        <input id="ollamaBaseUrl" class="input" type="text" value="http://127.0.0.1:11434" />
+      </label>
+      <div class="actions-inline" style="margin-top:10px;">
+        <button id="ollamaRefresh" class="btn secondary" type="button">Refresh Models</button>
+      </div>
+
+      <div class="hr" style="margin-top:16px;"></div>
+      <h3 class="h3">Models</h3>
+      <ul id="ollamaModels" class="note"><li>Loading...</li></ul>
+
+      <label style="display:block; margin-top:12px;">
+        <span class="field-help">Pull model</span>
+        <input id="ollamaPullModel" class="input" type="text" value="llama3.2:3b" />
+      </label>
+      <div class="actions-inline" style="margin-top:10px;">
+        <button id="ollamaPull" class="btn" type="button">Pull Model</button>
+      </div>
+
+      <div class="hr" style="margin-top:16px;"></div>
+      <h3 class="h3">Quick Prompt</h3>
+      <label style="display:block; margin-top:8px;">
+        <span class="field-help">Model</span>
+        <input id="ollamaPromptModel" class="input" type="text" value="llama3.2:3b" />
+      </label>
+      <label style="display:block; margin-top:8px;">
+        <span class="field-help">Prompt</span>
+        <textarea id="ollamaPromptText" class="input" rows="4" placeholder="Type a prompt..."></textarea>
+      </label>
+      <div class="actions-inline" style="margin-top:10px;">
+        <button id="ollamaGenerate" class="btn" type="button">Generate</button>
+      </div>
+      <pre id="ollamaOutput" class="note" style="margin-top:10px; white-space:pre-wrap;"></pre>
+
+      <div class="hr" style="margin-top:20px;"></div>
+      <div class="row">
+        <a class="btn" href="./index.html">Back to Upload</a>
+        <a class="btn" href="./admin.html">Admin Panel</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const byId = (id) => document.getElementById(id);
+    const statusEl = byId('ollamaStatus');
+    const modelsEl = byId('ollamaModels');
+    const outputEl = byId('ollamaOutput');
+
+    function baseUrl() {
+      return (byId('ollamaBaseUrl').value || '').trim().replace(/\/$/, '');
+    }
+
+    async function fetchJson(path, init) {
+      const res = await fetch(`${baseUrl()}${path}`, init);
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+      return text ? JSON.parse(text) : {};
+    }
+
+    async function refreshModels() {
+      statusEl.textContent = 'Checking...';
+      try {
+        const out = await fetchJson('/api/tags');
+        const models = Array.isArray(out.models) ? out.models : [];
+        statusEl.textContent = `Online (${models.length} models)`;
+        modelsEl.innerHTML = models.length
+          ? models.map(m => `<li>${m.name || '-'}</li>`).join('')
+          : '<li>No models found.</li>';
+      } catch (err) {
+        statusEl.textContent = 'Offline / blocked';
+        modelsEl.innerHTML = `<li>${String(err.message || err)}</li>`;
+      }
+    }
+
+    async function pullModel() {
+      const model = (byId('ollamaPullModel').value || '').trim();
+      if (!model) return;
+      outputEl.textContent = `Pulling ${model} ...`;
+      try {
+        await fetchJson('/api/pull', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, stream: false })
+        });
+        outputEl.textContent = `Pulled ${model}`;
+        byId('ollamaPromptModel').value = model;
+        await refreshModels();
+      } catch (err) {
+        outputEl.textContent = `Pull failed: ${String(err.message || err)}`;
+      }
+    }
+
+    async function generate() {
+      const model = (byId('ollamaPromptModel').value || '').trim();
+      const prompt = (byId('ollamaPromptText').value || '').trim();
+      if (!model || !prompt) return;
+      outputEl.textContent = 'Generating...';
+      try {
+        const out = await fetchJson('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, prompt, stream: false })
+        });
+        outputEl.textContent = out.response || JSON.stringify(out, null, 2);
+      } catch (err) {
+        outputEl.textContent = `Generate failed: ${String(err.message || err)}`;
+      }
+    }
+
+    byId('ollamaRefresh').addEventListener('click', refreshModels);
+    byId('ollamaPull').addEventListener('click', pullModel);
+    byId('ollamaGenerate').addEventListener('click', generate);
+    refreshModels();
+  </script>
+</body>
+</html>

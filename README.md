@@ -51,9 +51,10 @@ What it does:
 - clones/updates repo when run outside repo
 - initializes/updates git submodules (including `third_party/ollama`)
 - creates/uses `.venv` and installs `backend/requirements.txt`
-- when `OCR_MVP_LLM=ollama`, starts local Ollama + pulls model via `scripts/ollama_local.sh`
+- starts local Ollama (managed) + pulls model via `scripts/ollama_local.sh`
 - launches backend + frontend (tmux sessions when available)
 - prints MVP + admin URLs
+- includes local Ollama GUI page at `ollama.html`
 
 Termux note:
 - On Termux, bootstrap installs Rust/clang/pkg-config and uses the same
@@ -192,6 +193,9 @@ Useful env knobs:
 - `OCR_MVP_OLLAMA_AUTO_PULL=1|0`
 - `OCR_MVP_OLLAMA_INSTALL=1` (attempt auto-install via official script if ollama is missing)
 
+Ollama web GUI:
+- `http://127.0.0.1:8080/ollama.html` (or your configured frontend port)
+
 ## No-account sharing mode (free)
 
 If you do not want to create any backend service account, use local backend + temporary tunnel.
@@ -304,7 +308,8 @@ Control panel is separated from the GitHub Pages MVP UI:
 - `./scripts/bootstrap_mvp.sh --clean` or `OCR_MVP_CLEAN_DB=1`
 - `./scripts/run_dev.sh up --clean`
 
-This removes `data/records.sqlite` before backend startup so testing begins with no prior entries.
+This uses a disposable DB file under `data/runtime/records.clean.<timestamp>.sqlite`.
+Your primary `data/records.sqlite` is preserved.
 
 ## Security Notes (demo-light)
 

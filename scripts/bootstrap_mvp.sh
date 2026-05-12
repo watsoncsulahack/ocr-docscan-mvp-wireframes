@@ -17,6 +17,7 @@ USE_TMUX="${OCR_MVP_USE_TMUX:-1}"    # 1 | 0
 GIT_UPDATE="${OCR_MVP_GIT_UPDATE:-1}" # 1 | 0
 CLEAN_DB="${OCR_MVP_CLEAN_DB:-0}"    # 1 | 0
 OLLAMA_AUTO="${OCR_MVP_OLLAMA_AUTO:-1}" # 1 | 0 (when LLM=ollama)
+START_OLLAMA="${OCR_MVP_START_OLLAMA:-1}" # 1 | 0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -41,6 +42,7 @@ Options:
 Env knobs:
   OCR_MVP_LLM=ollama          enable Ollama path
   OCR_MVP_OLLAMA_AUTO=1       auto-start ollama via scripts/ollama_local.sh (default)
+  OCR_MVP_START_OLLAMA=1      start ollama backend during bootstrap (default)
   OCR_MVP_OLLAMA_MODEL=...    model to pull (default: llama3.2:3b)
 EOF
 }
@@ -104,17 +106,34 @@ init_submodules_if_present() {
 
 configure_llm_runtime() {
   local root="$1"
+  local ollama_started=0
+
+  if [[ "$START_OLLAMA" == "1" ]]; then
+    if [[ -x "$root/scripts/ollama_local.sh" ]]; then
+      if OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" bash "$root/scripts/ollama_local.sh" start; then
+        ollama_started=1
+      else
+        if [[ "$LLM" == "ollama" ]]; then
+          echo "[bootstrap-mvp] ERROR: failed to start ollama while OCR_MVP_LLM=ollama." >&2
+          exit 1
+        fi
+        echo "[bootstrap-mvp] warning: ollama startup failed; continuing because OCR_MVP_LLM=$LLM" >&2
+      fi
+    else
+      if [[ "$LLM" == "ollama" ]]; then
+        echo "[bootstrap-mvp] ERROR: scripts/ollama_local.sh is missing or not executable." >&2
+        exit 1
+      fi
+      echo "[bootstrap-mvp] warning: scripts/ollama_local.sh missing; skipping ollama startup" >&2
+    fi
+  fi
+
   case "$LLM" in
     ollama)
       export LLM_PROVIDER="openai"
       export LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:11434/v1}"
-      if [[ "$OLLAMA_AUTO" == "1" ]]; then
-        if [[ ! -x "$root/scripts/ollama_local.sh" ]]; then
-          echo "[bootstrap-mvp] ERROR: scripts/ollama_local.sh is missing or not executable." >&2
-          exit 1
-        fi
-        OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" \
-          bash "$root/scripts/ollama_local.sh" start
+      if [[ "$OLLAMA_AUTO" == "1" && "$ollama_started" != "1" && "$START_OLLAMA" != "1" ]]; then
+        OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" bash "$root/scripts/ollama_local.sh" start
       fi
       ;;
     gemini)
@@ -306,7 +325,7 @@ main() {
 
   echo ""
   if [[ "$ok" == "1" ]]; then
-    echo "✅ Backend: $health_url"
+  echo "✅ Backend: $health_url"
   else
     echo "⚠️ Backend (still starting): $health_url"
     if [[ -f "$root/.local/backend.log" ]]; then
@@ -316,6 +335,9 @@ main() {
   fi
   echo "✅ Frontend: $frontend_url"
   echo "✅ Admin panel: $frontend_url/admin.html"
+  if [[ "$START_OLLAMA" == "1" ]]; then
+    echo "✅ Ollama GUI: $frontend_url/ollama.html"
+  fi
 
   echo "To stop the above servers, run this script:"
   echo "  $root/scripts/stop_mvp.sh"
