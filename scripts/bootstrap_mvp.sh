@@ -33,17 +33,18 @@ ensure_cmd() {
 
 usage() {
   cat <<EOF
-Usage: ./scripts/bootstrap_mvp.sh [--clean]
+Usage: ./scripts/bootstrap_mvp.sh [--clean] [--model <ollama-model>]
 
 Options:
-  --clean      start with a clean DB (removes data/records.sqlite before backend start)
+  --clean      start with a clean disposable DB for this run
+  --model      ollama model name (example: glm-ocr)
   --help       show this help
 
 Env knobs:
   OCR_MVP_LLM=ollama          enable Ollama path
   OCR_MVP_OLLAMA_AUTO=1       auto-start ollama via scripts/ollama_local.sh (default)
   OCR_MVP_START_OLLAMA=1      start ollama backend during bootstrap (default)
-  OCR_MVP_OLLAMA_MODEL=...    model to pull (default: llama3.2:3b)
+  OCR_MVP_OLLAMA_MODEL=...    model to pull/run (default: glm-ocr)
 EOF
 }
 
@@ -52,6 +53,15 @@ parse_args() {
     case "$1" in
       --clean)
         CLEAN_DB=1
+        ;;
+      --model)
+        shift
+        if [[ $# -eq 0 || -z "${1:-}" ]]; then
+          echo "[bootstrap-mvp] --model requires a model name" >&2
+          exit 1
+        fi
+        export OCR_MVP_OLLAMA_MODEL="$1"
+        LLM="ollama"
         ;;
       --help|-h)
         usage
@@ -110,7 +120,7 @@ configure_llm_runtime() {
 
   if [[ "$START_OLLAMA" == "1" ]]; then
     if [[ -x "$root/scripts/ollama_local.sh" ]]; then
-      if OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" bash "$root/scripts/ollama_local.sh" start; then
+      if OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" OCR_MVP_OLLAMA_AUTO_RUN="${OCR_MVP_OLLAMA_AUTO_RUN:-1}" bash "$root/scripts/ollama_local.sh" start; then
         ollama_started=1
       else
         if [[ "$LLM" == "ollama" ]]; then
@@ -132,8 +142,9 @@ configure_llm_runtime() {
     ollama)
       export LLM_PROVIDER="openai"
       export LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:11434/v1}"
+      export LLM_MODEL="${LLM_MODEL:-${OCR_MVP_OLLAMA_MODEL:-glm-ocr}}"
       if [[ "$OLLAMA_AUTO" == "1" && "$ollama_started" != "1" && "$START_OLLAMA" != "1" ]]; then
-        OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" bash "$root/scripts/ollama_local.sh" start
+        OCR_MVP_OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}" OCR_MVP_OLLAMA_AUTO_RUN="${OCR_MVP_OLLAMA_AUTO_RUN:-1}" bash "$root/scripts/ollama_local.sh" start
       fi
       ;;
     gemini)
@@ -337,6 +348,7 @@ main() {
   echo "✅ Admin panel: $frontend_url/admin.html"
   if [[ "$START_OLLAMA" == "1" ]]; then
     echo "✅ Ollama API: http://127.0.0.1:${OCR_MVP_OLLAMA_PORT:-11434}"
+    echo "✅ Ollama model: ${OCR_MVP_OLLAMA_MODEL:-glm-ocr}"
   fi
 
   echo "To stop the above servers, run this script:"

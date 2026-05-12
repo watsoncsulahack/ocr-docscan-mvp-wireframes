@@ -42,7 +42,7 @@ Optional env knobs:
 ```bash
 OCR_MVP_PROFILE=phone OCR_MVP_LLM=gemini bash ./scripts/bootstrap_mvp.sh
 OCR_MVP_BACKEND_PORT=8010 OCR_MVP_FRONTEND_PORT=8080 bash ./scripts/bootstrap_mvp.sh
-OCR_MVP_LLM=ollama OCR_MVP_OLLAMA_MODEL=llama3.2:3b bash ./scripts/bootstrap_mvp.sh
+./scripts/bootstrap_mvp.sh --model glm-ocr
 bash ./scripts/bootstrap_mvp.sh --clean
 ```
 
@@ -51,7 +51,7 @@ What it does:
 - clones/updates repo when run outside repo
 - initializes/updates git submodules (including `third_party/ollama`)
 - creates/uses `.venv` and installs `backend/requirements.txt`
-- starts local Ollama (managed) + pulls model via `scripts/ollama_local.sh`
+- starts local Ollama (managed), pulls model, then runs warm prompt via `scripts/ollama_local.sh`
 - launches backend + frontend (tmux sessions when available)
 - prints MVP + admin URLs
 
@@ -188,8 +188,9 @@ bash ./scripts/ollama_local.sh stop
 ```
 
 Useful env knobs:
-- `OCR_MVP_OLLAMA_MODEL` (default `llama3.2:3b`)
+- `OCR_MVP_OLLAMA_MODEL` (default `glm-ocr`)
 - `OCR_MVP_OLLAMA_AUTO_PULL=1|0`
+- `OCR_MVP_OLLAMA_AUTO_RUN=1|0`
 - `OCR_MVP_OLLAMA_INSTALL=1` (attempt auto-install via official script if ollama is missing)
 
 Notes:

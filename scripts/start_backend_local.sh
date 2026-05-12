@@ -35,6 +35,7 @@ case "$LLM_MODE" in
   ollama)
     export LLM_PROVIDER="openai"
     export LLM_BASE_URL="${LLM_BASE_URL:-http://127.0.0.1:11434/v1}"
+    export LLM_MODEL="${LLM_MODEL:-${OCR_MVP_OLLAMA_MODEL:-glm-ocr}}"
     ;;
   gemini)
     export LLM_PROVIDER="gemini"

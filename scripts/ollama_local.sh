@@ -2,15 +2,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ACTION="${1:-start}" # start | stop | status | pull
+ACTION="${1:-start}" # start | stop | status | pull | run
 
 OLLAMA_BIN="${OCR_MVP_OLLAMA_BIN:-ollama}"
 OLLAMA_PORT="${OCR_MVP_OLLAMA_PORT:-11434}"
 OLLAMA_HOST="${OCR_MVP_OLLAMA_HOST:-127.0.0.1:${OLLAMA_PORT}}"
 OLLAMA_URL="http://${OLLAMA_HOST}"
-OLLAMA_MODEL="${OCR_MVP_OLLAMA_MODEL:-llama3.2:3b}"
+OLLAMA_MODEL="${OCR_MVP_OLLAMA_MODEL:-glm-ocr}"
 OLLAMA_AUTO_PULL="${OCR_MVP_OLLAMA_AUTO_PULL:-1}"
+OLLAMA_AUTO_RUN="${OCR_MVP_OLLAMA_AUTO_RUN:-1}"
 OLLAMA_AUTO_INSTALL="${OCR_MVP_OLLAMA_INSTALL:-0}"
+OLLAMA_WARM_PROMPT="${OCR_MVP_OLLAMA_WARM_PROMPT:-ok}"
 
 LOCAL_DIR="$ROOT_DIR/.local"
 PID_FILE="$LOCAL_DIR/ollama.pid"
@@ -87,6 +89,13 @@ start_ollama() {
     echo "[ollama] ensuring model: $OLLAMA_MODEL"
     OLLAMA_HOST="$OLLAMA_HOST" "$OLLAMA_BIN" pull "$OLLAMA_MODEL"
   fi
+
+  if [[ "$OLLAMA_AUTO_RUN" == "1" ]] && [[ -n "$OLLAMA_MODEL" ]]; then
+    echo "[ollama] warming model with: ollama run $OLLAMA_MODEL"
+    OLLAMA_HOST="$OLLAMA_HOST" "$OLLAMA_BIN" run "$OLLAMA_MODEL" "$OLLAMA_WARM_PROMPT" >/dev/null
+  fi
+
+  status_ollama
 }
 
 stop_ollama() {
@@ -141,6 +150,15 @@ pull_model() {
   OLLAMA_HOST="$OLLAMA_HOST" "$OLLAMA_BIN" pull "$OLLAMA_MODEL"
 }
 
+run_model() {
+  ensure_ollama_bin
+  if [[ -z "$OLLAMA_MODEL" ]]; then
+    echo "[ollama] OCR_MVP_OLLAMA_MODEL is empty" >&2
+    return 1
+  fi
+  OLLAMA_HOST="$OLLAMA_HOST" "$OLLAMA_BIN" run "$OLLAMA_MODEL" "$OLLAMA_WARM_PROMPT"
+}
+
 case "$ACTION" in
   start|up)
     start_ollama
@@ -154,8 +172,11 @@ case "$ACTION" in
   pull)
     pull_model
     ;;
+  run)
+    run_model
+    ;;
   *)
-    echo "Usage: $(basename "$0") {start|stop|status|pull}" >&2
+    echo "Usage: $(basename "$0") {start|stop|status|pull|run}" >&2
     exit 1
     ;;
 esac
